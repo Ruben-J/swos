@@ -1,0 +1,27 @@
+{
+  "name": "pitchlegend",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-native top-down arcade football game with full career mode",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter ./apps/web run dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

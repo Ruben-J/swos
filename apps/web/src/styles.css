@@ -1,0 +1,278 @@
+:root {
+  --bg: #0c1116;
+  --panel: #141b22;
+  --accent: #2fd07a;
+  --accent-2: #f0b429;
+  --text: #e8edf2;
+  --muted: #8b99a7;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  text-align: center;
+}
+
+.menu h1 {
+  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  margin: 0;
+  letter-spacing: 0.08em;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.menu .tagline {
+  color: var(--muted);
+  margin-top: -0.8rem;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(320px, 80vw);
+}
+
+button.btn {
+  font-size: 1.05rem;
+  padding: 0.85rem 1.2rem;
+  border-radius: 10px;
+  border: 1px solid #26323d;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.08s ease, border-color 0.15s ease;
+}
+
+button.btn:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+button.btn.primary {
+  background: linear-gradient(90deg, #1f7a45, #2fd07a);
+  border: none;
+  font-weight: 700;
+}
+
+button.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.match-screen {
+  position: fixed;
+  inset: 0;
+}
+
+.pitch-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.pitch-wrap canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  /* Pixi zet inline width/height in px; forceer toch viewport-vullend zodat de
+     HUD-hoeken exact op de zichtbare rand uitlijnen. */
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* TV-scorebug linksboven. */
+.scorebug {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: rgba(8, 12, 16, 0.82);
+  border: 1px solid #26323d;
+  border-left: 0;
+  border-radius: 8px;
+  padding: 7px 14px 7px 10px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.sb-chip {
+  width: 10px;
+  height: 18px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.sb-team {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 0.95rem;
+}
+
+.sb-score {
+  font-size: 1.3rem;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.sb-clock {
+  margin-left: 6px;
+  padding-left: 12px;
+  border-left: 1px solid #2c3a46;
+  color: var(--accent-2);
+  font-weight: 700;
+  min-width: 3ch;
+  text-align: center;
+}
+
+.phase-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 12, 16, 0.85);
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  pointer-events: none;
+}
+
+/* TV-naamplaatje voor de geselecteerde speler, onderin de hoeken. */
+.player-card {
+  position: absolute;
+  bottom: 16px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: rgba(8, 12, 16, 0.82);
+  border: 1px solid #26323d;
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  min-width: 150px;
+}
+
+.player-card.left {
+  left: 16px;
+}
+
+.player-card.right {
+  right: 16px;
+  flex-direction: row-reverse;
+}
+
+.pc-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 12px;
+  flex: 1;
+}
+
+.player-card.right .pc-info {
+  align-items: flex-end;
+}
+
+.pc-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pc-team {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.pc-pos {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  border: 1px solid #36424d;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.pc-ball {
+  color: #f0b429;
+  font-size: 0.7rem;
+}
+
+.pc-stamina {
+  width: 100%;
+}
+
+.pc-stamina-track {
+  height: 6px;
+  background: #26323d;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pc-stamina-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2fd07a, #f0b429);
+  transition: width 0.1s linear;
+}
+
+.pc-stamina-fill.empty {
+  background: #d4382f;
+}
+
+.match-topbar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  pointer-events: auto;
+}
+
+kbd {
+  background: #222c36;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid #36424d;
+  font-family: monospace;
+}
