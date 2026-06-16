@@ -89,6 +89,8 @@ export interface PlayerIntent {
   actionHeld: number;
   /** True op de tick dat de actieknop wordt losgelaten (trigger pass/shot). */
   actionReleased: boolean;
+  /** Welke actie: passen (X), schieten (Z), of geen. null = generieke release. */
+  actionKind: "pass" | "shoot" | null;
   /** True zolang ingedrukt na release-venster — gebruikt voor aftertouch sturen. */
   aftertouch: Vec2;
   /** Vraag om handmatige spelerwissel (zonder bal). */
@@ -100,6 +102,7 @@ export const emptyIntent = (): PlayerIntent => ({
   sprint: false,
   actionHeld: 0,
   actionReleased: false,
+  actionKind: null,
   aftertouch: { x: 0, y: 0 },
   switchPlayer: false,
 });

@@ -269,6 +269,25 @@ button.btn:disabled {
   pointer-events: auto;
 }
 
+.match-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: rgba(8, 12, 16, 0.66);
+  padding: 6px 14px;
+  border-radius: 8px;
+  pointer-events: none;
+  text-align: center;
+}
+
 kbd {
   background: #222c36;
   border-radius: 4px;

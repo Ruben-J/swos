@@ -179,11 +179,12 @@ describe("MatchSim", () => {
     sim.step(TICK_DT, emptyIntent());
     expect(sim.snapshot().possession).toBe("home");
 
-    // Mens trapt uit (vasthouden = harde trap, richting het veld in).
+    // Mens trapt uit (Z = schieten = harde/lange trap, richting het veld in).
     const kick = {
       ...emptyIntent(),
       actionReleased: true,
       actionHeld: 0.4,
+      actionKind: "shoot" as const,
       move: { x: 1, y: 0 },
       aftertouch: { x: 1, y: 0 },
     };
@@ -225,11 +226,12 @@ describe("MatchSim", () => {
     sim.step(TICK_DT, emptyIntent());
     expect(sim.snapshot().possession).toBe("home");
 
-    // Tik met richting OMLAAG: keeper hoort naar de teamgenoot beneden te passen.
+    // X (passen) met richting OMLAAG: keeper hoort naar de teamgenoot beneden te passen.
     const passDown = {
       ...emptyIntent(),
       actionReleased: true,
       actionHeld: 0,
+      actionKind: "pass" as const,
       move: { x: 0, y: 1 },
       aftertouch: { x: 0, y: 1 },
     };

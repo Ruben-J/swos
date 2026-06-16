@@ -41,8 +41,6 @@ import {
 } from "./types.js";
 
 const CROSSBAR_HEIGHT = 2.44;
-const SHOT_HOLD_THRESHOLD = 0.22; // s ingedrukt -> hard schot/lange bal
-const KEEPER_LONG_HOLD = 0.4; // keeper: pas hierboven een verre, lofted bal
 const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de hervatting
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
@@ -425,13 +423,14 @@ export class MatchSim {
 
     if (intent.actionReleased) {
       const hold = intent.actionHeld;
+      // Z = schieten, X = passen. (null = generieke release telt als pass.)
+      const shoot = intent.actionKind === "shoot";
       const aimDir = this.aimDirection(p, intent);
       if (isOwner) {
         if (p.isKeeper) {
-          // Keeper verdeelt naar een teamgenoot in de kijkrichting. Tik = korte,
-          // ROLLENDE en goed te controleren pass (zachte power < controlegrens);
-          // pas bij duidelijk vasthouden een verre, lofted bal.
-          const longBall = hold >= KEEPER_LONG_HOLD;
+          // Keeper verdeelt naar een teamgenoot in de kijkrichting. X = korte,
+          // ROLLENDE en goed te controleren pass; Z = verre, lofted uittrap.
+          const longBall = shoot;
           const maxDist = longBall ? 70 : 38;
           const mate = nearestTeammateInCone(
             this.players,
@@ -443,33 +442,33 @@ export class MatchSim {
           const dir = mate ? dirTo(p, mate.pos) : aimDir;
           const d = mate ? dist(p.pos, mate.pos) : longBall ? 36 : 14;
           cmd.kick = longBall
-            ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.6 ? 4 : 0), curve: 0 }
+            ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.5 ? 4 : 0), curve: 0 }
             : { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0 };
-        } else if (hold >= SHOT_HOLD_THRESHOLD) {
+        } else if (shoot) {
           // Schot ALTIJD in de kijkrichting (facing): die is vloeiend (uit de
           // gesmoothde snelheid), dus je kunt ook tussen de 8 toetsrichtingen in
-          // mikken. Langer ingehouden = harder én hoger; bijsturen via aftertouch.
-          const charge = clamp((hold - SHOT_HOLD_THRESHOLD) / 0.45, 0, 1);
+          // mikken. Langer ingehouden (Z) = harder én hoger; bijsturen via aftertouch.
+          const charge = clamp(hold / 0.5, 0, 1);
           cmd.kick = {
             dir: { x: Math.cos(p.facing), y: Math.sin(p.facing) },
-            power: 22 + charge * 16 + (p.stats.shooting / 100) * 8,
+            // Kort tikje = zacht schot; langer inhouden = veel harder.
+            power: 13 + charge * 25 + (p.stats.shooting / 100) * 8,
             // Veel meer hoogte bij langer inhouden (echte lob over verdedigers).
             loft: 1 + charge * 13,
             curve: 0,
           };
         } else {
-          // Korte pass naar dichtstbijzijnde teamgenoot in kegel.
+          // Korte pass (X) naar dichtstbijzijnde teamgenoot in kegel.
           const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir));
           const dir = mate ? dirTo(p, mate.pos) : aimDir;
           const d = mate ? dist(p.pos, mate.pos) : 14;
           cmd.kick = { dir, power: 13 + Math.min(14, d * 0.5), loft: 0, curve: 0 };
         }
       } else if (dist(p.pos, this.ball.pos) < 1.3 && this.ball.z < 1.5) {
-        // Losse bal aan de voet: one-touch (tik = pass, vasthouden = clear).
-        cmd.kick =
-          hold >= SHOT_HOLD_THRESHOLD
-            ? { dir: aimDir, power: 26, loft: 3, curve: 0 }
-            : { dir: aimDir, power: 16, loft: 0, curve: 0 };
+        // Losse bal aan de voet: one-touch (X = pass, Z = clear).
+        cmd.kick = shoot
+          ? { dir: aimDir, power: 26, loft: 3, curve: 0 }
+          : { dir: aimDir, power: 16, loft: 0, curve: 0 };
       } else {
         // Sliding tackle richting de bal.
         cmd.tackle = true;
@@ -681,7 +680,8 @@ export class MatchSim {
           this.takeRestart(aim, 34, 1);
         } else {
           const aim = this.aimDirection(taker, humanIntent);
-          const power = humanIntent.actionHeld >= SHOT_HOLD_THRESHOLD ? 24 : 15;
+          // Z (schieten) = harde inname, X (passen) = ingespeelde bal.
+          const power = humanIntent.actionKind === "shoot" ? 24 : 15;
           this.takeRestart(aim, power, this.restartIsKickoff ? 0 : 2);
         }
       }

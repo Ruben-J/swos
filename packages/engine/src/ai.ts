@@ -158,8 +158,17 @@ export interface TeamAiPlan {
   coverId: string | null;
   /** Speler die een loopactie maakt (induikt in de ruimte), of null. */
   runnerId: string | null;
+  /** Mandekking: verdediger-id -> op te pakken tegenstander-id (max 1-op-1). */
+  marks: Map<string, string>;
   targets: Map<string, Vec2>;
 }
+
+/** Minimale afstand van de eigen doellijn voor veldspelers (linie niet achter keeper). */
+const DEF_LINE_MIN = 9;
+/** Mark alleen tegenstanders rond de bal (de actieve zone van het veld). */
+const MARK_BALL_RADIUS = 38;
+/** Verdediger pakt alleen op als de man redelijk dichtbij is, anders houdt hij vorm. */
+const MARK_REACH = 24;
 
 /**
  * Situationele laag: wijs per tick rollen toe (wie drukt, wie dekt) en bereken
@@ -205,6 +214,17 @@ export function computeTeamPlan(
   // bal, dus de toegestane lijn = verst van die drie (middenlijn / bal / linie).
   clampOffside(targets, players, side, ball.pos);
 
+  // Verdedigende lijn niet te diep: veldspelers blijven vóór de keeper (een
+  // vaste minimumafstand van de eigen doellijn), zodat de linie niet op of
+  // achter de keeper komt te staan bij laag verdedigen.
+  for (const p of players) {
+    if (p.side !== side || p.isKeeper) continue;
+    const t = targets.get(p.id);
+    if (!t) continue;
+    const x = side === "home" ? Math.max(t.x, DEF_LINE_MIN) : Math.min(t.x, PITCH.width - DEF_LINE_MIN);
+    if (x !== t.x) targets.set(p.id, { x, y: t.y });
+  }
+
   void tick;
 
   // Presser/cover bepalen op time-to-ball, gewogen met pressing-bereidheid.
@@ -223,7 +243,46 @@ export function computeTeamPlan(
     coverId = ranked[1]?.p.id ?? null;
   }
 
-  return { side, presserId, coverId, runnerId: null, targets };
+  // Mandekking: gecoördineerd 1-op-1. De presser jaagt de bal; de overige
+  // verdedigers pakken elk hoogstens één tegenstander op (en geen twee man op
+  // dezelfde). Alleen tegenstanders rond de bal worden gedekt — daarbuiten houdt
+  // de ploeg gewoon haar formatie. We dekken NIET als we zelf in bezit zijn —
+  // ook niet tijdens een eigen pass (bal even owner-loos): dan formatie zoeken.
+  const inPossession = teamHasBall || (controlling === null && ball.lastTouchSide === side);
+  const marks = new Map<string, string>();
+  if (!inPossession) {
+    const carrierId = ball.ownerId;
+    const threats = players
+      .filter(
+        (o) =>
+          o.side !== side &&
+          !o.isKeeper &&
+          o.id !== carrierId &&
+          distSq(o.pos, ball.pos) < MARK_BALL_RADIUS * MARK_BALL_RADIUS,
+      )
+      // Dichtste bij de bal eerst: dat zijn de directe dreigingen.
+      .sort((a, b) => distSq(a.pos, ball.pos) - distSq(b.pos, ball.pos));
+    const usedDef = new Set<string>();
+    if (presserId) usedDef.add(presserId);
+    for (const o of threats) {
+      let best: PlayerEntity | null = null;
+      let bestD = MARK_REACH * MARK_REACH;
+      for (const d of outfield) {
+        if (usedDef.has(d.id)) continue;
+        const dd = distSq(d.pos, o.pos);
+        if (dd < bestD) {
+          bestD = dd;
+          best = d;
+        }
+      }
+      if (best) {
+        marks.set(best.id, o.id);
+        usedDef.add(best.id);
+      }
+    }
+  }
+
+  return { side, presserId, coverId, runnerId: null, marks, targets };
 }
 
 /**
@@ -312,6 +371,33 @@ export function computeAiCommand(
     return cmd;
   }
 
+  // Mandekking: dek je toegewezen man losjes (niet eraan vastgeplakt). Kies
+  // positie tussen het eigen doel en de aanvaller met wat ruimte, zodat je niet
+  // uit positie bent als hij de bal krijgt. Heeft hij de bal, dan druk je op om
+  // af te pakken — maar blijf doel-zijde om het doel af te schermen.
+  const markId = plan.marks.get(player.id);
+  if (markId) {
+    const man = opponents.find((o) => o.id === markId);
+    if (man) {
+      const toGoal = normalize({ x: ownGoal.x - man.pos.x, y: ownGoal.y - man.pos.y });
+      if (ball.ownerId === man.id) {
+        // Hij heeft de bal: containment-druk net aan de doel-kant, niet erlangs.
+        const press: Vec2 = { x: man.pos.x + toGoal.x * 1.4, y: man.pos.y + toGoal.y * 1.4 };
+        moveTo(cmd, player, press, dist(player.pos, press) > 3);
+        if (dist(player.pos, man.pos) < 1.7) cmd.tackle = true;
+      } else {
+        // Geen bal: goal-zijde positie met ruimte (klaar om in te grijpen),
+        // maar niet achter de eigen doellijn/keeper.
+        const gap = 4.5;
+        const mx = man.pos.x + toGoal.x * gap;
+        const x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
+        const mark: Vec2 = { x, y: man.pos.y + toGoal.y * gap };
+        moveTo(cmd, player, mark, dist(player.pos, mark) > 6);
+      }
+      return cmd;
+    }
+  }
+
   if (player.id === plan.coverId) {
     // Cover: positie tussen bal en eigen doel (cover shadow).
     const cover: Vec2 = {
@@ -322,16 +408,7 @@ export function computeAiCommand(
     return cmd;
   }
 
-  // Zonaal: houd je positie, maar pak een tegenstander op die je zone binnenkomt.
-  const intruder = nearestOpponentNear(opponents, player.pos, 7);
-  if (intruder) {
-    const mark: Vec2 = {
-      x: intruder.pos.x + (ownGoal.x - intruder.pos.x) * 0.18,
-      y: intruder.pos.y,
-    };
-    moveTo(cmd, player, mark, true);
-    return cmd;
-  }
+  // Geen man toegewezen en geen rol: houd de formatie (tactische target).
   moveTo(cmd, player, target, false);
   return cmd;
 }

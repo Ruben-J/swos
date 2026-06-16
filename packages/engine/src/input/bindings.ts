@@ -7,7 +7,8 @@ export interface KeyBindings {
   down: string[];
   left: string[];
   right: string[];
-  action: string[];
+  pass: string[];
+  shoot: string[];
   sprint: string[];
   switchPlayer: string[];
 }
@@ -17,7 +18,8 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   down: ["ArrowDown", "KeyS"],
   left: ["ArrowLeft", "KeyA"],
   right: ["ArrowRight", "KeyD"],
-  action: ["Space", "KeyJ"],
+  pass: ["KeyX"],
+  shoot: ["KeyZ"],
   sprint: ["ShiftLeft", "ShiftRight", "KeyK"],
   switchPlayer: ["KeyL", "Tab"],
 };

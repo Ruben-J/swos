@@ -14,6 +14,8 @@ export class KeyboardInput {
   private bindings: KeyBindings;
   private actionDownAt: number | null = null;
   private actionHeld = 0;
+  private downKind: "pass" | "shoot" | null = null;
+  private releasedKind: "pass" | "shoot" | null = null;
   private releasedEdge = false;
   private switchEdge = false;
   private target: Window | HTMLElement;
@@ -22,8 +24,13 @@ export class KeyboardInput {
     if (this.isBound(e.code)) e.preventDefault();
     if (this.pressed.has(e.code)) return;
     this.pressed.add(e.code);
-    if (this.matches(this.bindings.action, e.code) && this.actionDownAt === null) {
-      this.actionDownAt = performance.now();
+    // Eerste van pass (X) of schiet (Z) die ingedrukt wordt, bepaalt de actie.
+    if (this.actionDownAt === null) {
+      const kind = this.codeKind(e.code);
+      if (kind) {
+        this.actionDownAt = performance.now();
+        this.downKind = kind;
+      }
     }
     if (this.matches(this.bindings.switchPlayer, e.code)) {
       this.switchEdge = true;
@@ -32,9 +39,11 @@ export class KeyboardInput {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.pressed.delete(e.code);
-    if (this.matches(this.bindings.action, e.code) && this.actionDownAt !== null) {
+    if (this.actionDownAt !== null && this.codeKind(e.code) === this.downKind) {
       this.actionHeld = (performance.now() - this.actionDownAt) / 1000;
+      this.releasedKind = this.downKind;
       this.actionDownAt = null;
+      this.downKind = null;
       this.releasedEdge = true;
     }
   };
@@ -79,18 +88,26 @@ export class KeyboardInput {
       intent.actionHeld = this.actionHeld;
     }
     intent.actionReleased = this.releasedEdge;
+    intent.actionKind = this.downKind ?? this.releasedKind;
     intent.switchPlayer = this.switchEdge;
 
     // Voeg gamepad samen (overschrijft beweging als stick wordt gebruikt).
     pollGamepad(intent);
 
     this.releasedEdge = false;
+    this.releasedKind = null;
     this.switchEdge = false;
     return intent;
   }
 
   private isBound(code: string): boolean {
     return Object.values(this.bindings).some((codes) => codes.includes(code));
+  }
+
+  private codeKind(code: string): "pass" | "shoot" | null {
+    if (this.bindings.pass.includes(code)) return "pass";
+    if (this.bindings.shoot.includes(code)) return "shoot";
+    return null;
   }
 
   private matches(codes: string[], code: string): boolean {

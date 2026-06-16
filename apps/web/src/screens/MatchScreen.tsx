@@ -43,7 +43,7 @@ export function MatchScreen({ config, onExit }: Props) {
 
   const clock = snap ? formatClock(snap.matchMinute) : "0'";
   const phaseLabel = snap?.awaitingHumanRestart
-    ? "Druk op Space om in te nemen"
+    ? "Druk op X of Z om in te nemen"
     : snap && snap.phase in PHASE_LABEL
       ? PHASE_LABEL[snap.phase]
       : null;
@@ -92,6 +92,17 @@ export function MatchScreen({ config, onExit }: Props) {
           <button className="btn" onClick={onExit}>
             Terug
           </button>
+        </div>
+        <div className="match-controls">
+          <div>
+            <kbd>WASD</kbd> / pijltjes &mdash; bewegen
+          </div>
+          <div>
+            <kbd>X</kbd> passen &middot; <kbd>Z</kbd> schieten (langer = harder/hoger)
+          </div>
+          <div>
+            <kbd>Shift</kbd> sprint &middot; tijdens schot sturen = effect
+          </div>
         </div>
       </div>
     </div>
