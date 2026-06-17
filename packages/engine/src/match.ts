@@ -44,9 +44,16 @@ const CROSSBAR_HEIGHT = 2.44;
 const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de hervatting
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
+const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
+const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
 
 /** Soort spelhervatting (stuurt nemer-keuze en voorsortering van de ploegen). */
 type RestartKind = "kickoff" | "throwin" | "goalkick" | "corner" | "freekick" | "penalty";
+
+/** Hervatting met een mikbaar richt-pijltje (schiet/voorzet in de pijlrichting). */
+function isAimableRestart(kind: RestartKind | null): boolean {
+  return kind === "corner" || kind === "freekick" || kind === "penalty";
+}
 
 export interface MatchSnapshotPlayer {
   id: string;
@@ -76,6 +83,8 @@ export interface MatchSnapshot {
   activeExhausted: boolean;
   /** Wacht de hervatting op een inname door de menselijke speler? */
   awaitingHumanRestart: boolean;
+  /** Richt-pijltje (rad) voor een mikbare hervatting van de mens, of null. */
+  restartAim: number | null;
 }
 
 export class MatchSim {
@@ -103,6 +112,9 @@ export class MatchSim {
   private restartIsKickoff = false;
   private restartIsPenalty = false;
   private restartKind: RestartKind | null = null;
+  // Richt-hoek (rad) voor een mikbare hervatting (hoek/vrije trap/penalty): het
+  // pijltje dat de mens met links/rechts bijstelt; Z schiet die richting op.
+  private restartAim: number | null = null;
   // Uitgestelde vrije trap door een overtreding (verwerkt na de commandolus).
   private pendingFoul: { spot: Vec2; side: Side } | null = null;
   // "Fluit"-fase: bal gaat over de lijn / overtreding gemaakt; spel loopt nog
@@ -214,6 +226,7 @@ export class MatchSim {
     this.restartIsKickoff = false;
     this.restartIsPenalty = false;
     this.restartKind = null;
+    this.restartAim = null;
     this.ballProtectedFor = null;
   }
 
@@ -631,6 +644,12 @@ export class MatchSim {
     this.ball.z = 0;
     if (taking) this.ballProtectedFor = taking;
 
+    // Mens stelt het richt-pijltje bij met links/rechts (ook tijdens de pauze).
+    if (taking === this.humanSide && this.restartAim !== null) {
+      this.restartAim += humanIntent.move.x * AIM_ROTATE_RATE * dt;
+      if (taker) taker.facing = this.restartAim;
+    }
+
     const special = this.restartKind
       ? this.restartSpecialTargets(this.ball.pos, taking, this.restartKind, taker?.id ?? null)
       : null;
@@ -678,28 +697,33 @@ export class MatchSim {
     if (taking === this.humanSide) {
       // Match staat stil tot de mens zelf inneemt.
       if (humanIntent.actionReleased) {
-        const aim = this.aimDirection(taker, humanIntent);
+        // Schiet-/voorzetrichting = het richt-pijltje als dat actief is (hoek/
+        // vrije trap/penalty), anders de toetsrichting.
+        const shootDir =
+          this.restartAim !== null
+            ? { x: Math.cos(this.restartAim), y: Math.sin(this.restartAim) }
+            : this.aimDirection(taker, humanIntent);
         if (this.restartIsPenalty) {
-          // Strafschop: schiet in de kijkrichting (mik op de hoek).
-          this.takeRestart(aim, 34, 1);
+          this.takeRestart(shootDir, 34, 1);
         } else {
           const charge = clamp(humanIntent.actionHeld / 0.5, 0, 1);
           const shoot = humanIntent.actionKind === "shoot";
           if (shoot && !this.restartIsKickoff) {
-            // Z = geladen, hoge/harde bal (uittrap/lange bal). Langer inhouden =
-            // harder én hoger weggeschoten.
-            this.takeRestart(aim, 20 + charge * 16, 3 + charge * 9);
+            // Z = geladen schot/voorzet in de pijlrichting. Langer inhouden =
+            // harder én hoger.
+            this.takeRestart(shootDir, 20 + charge * 16, 3 + charge * 9);
           } else {
             // X = gerichte, harde pass op maat naar een teamgenoot in de
-            // kijkrichting (ook bij doeltrap/inworp); de ontvanger komt 'm tegemoet.
+            // TOETSrichting (ook bij hoek/inworp); de ontvanger komt 'm tegemoet.
+            const passAim = this.aimDirection(taker, humanIntent);
             const mate = nearestTeammateInCone(
               this.players,
               taker,
-              aimAngle(aim),
+              aimAngle(passAim),
               Math.PI * 0.6,
               this.restartIsKickoff ? 40 : 64,
             );
-            const dir = mate ? dirTo(taker, mate.pos) : aim;
+            const dir = mate ? dirTo(taker, mate.pos) : passAim;
             const d = mate ? dist(taker.pos, mate.pos) : 18;
             const power = this.restartIsKickoff
               ? clamp(11 + d * 0.4, 12, 22)
@@ -1081,7 +1105,88 @@ export class MatchSim {
   ): Map<string, Vec2> | null {
     if (kind === "corner") return this.cornerTargets(spot, takingSide, takerId);
     if (kind === "goalkick") return this.goalKickTargets(takingSide);
+    if (kind === "freekick") {
+      // Alleen rond het strafschopgebied een gevaarlijke set-piece-opstelling
+      // (muurtje + aanvallers voor het doel); elders gewoon doorspelen.
+      const dGoal = dist(spot, attackingGoal(takingSide));
+      if (dGoal < FREEKICK_DANGER_DIST) return this.freekickTargets(spot, takingSide, takerId);
+    }
     return null;
+  }
+
+  /**
+   * Gevaarlijke vrije trap (rond de box): de aanvallende ploeg verzamelt voor
+   * het doel (zoals bij een hoek), de verdedigers zetten een muurtje van 2-3
+   * spelers op de bal-doellijn op vrijetrap-afstand, de rest dekt in de zone.
+   */
+  private freekickTargets(spot: Vec2, takingSide: Side, takerId: string | null): Map<string, Vec2> {
+    const m = new Map<string, Vec2>();
+    const defendingSide = otherSide(takingSide);
+    const goal = attackingGoal(takingSide);
+    const gx = goal.x;
+    const sign = gx === 0 ? 1 : -1; // het veld in vanaf het doel
+    const cy = PITCH.height / 2;
+    const goalCenter: Vec2 = { x: gx, y: cy };
+    const toGoal = normalize({ x: goalCenter.x - spot.x, y: goalCenter.y - spot.y });
+    const perp: Vec2 = { x: -toGoal.y, y: toGoal.x };
+    const dGoal = dist(spot, goalCenter);
+
+    // Verdedigend muurtje op vrijetrap-afstand op de lijn bal -> doel.
+    const wallCount = dGoal < 24 ? 3 : 2;
+    const wallCenter: Vec2 = { x: spot.x + toGoal.x * 9.15, y: spot.y + toGoal.y * 9.15 };
+    const defAll = this.players.filter((p) => p.side === defendingSide && !p.isKeeper);
+    const wallers = [...defAll]
+      .sort((a, b) => dist(a.pos, wallCenter) - dist(b.pos, wallCenter))
+      .slice(0, wallCount);
+    const wallSet = new Set(wallers.map((p) => p.id));
+    wallers.forEach((p, i) => {
+      const off = (i - (wallCount - 1) / 2) * 1.3;
+      m.set(p.id, {
+        x: clamp(wallCenter.x + perp.x * off, 2, PITCH.width - 2),
+        y: clamp(wallCenter.y + perp.y * off, 2, PITCH.height - 2),
+      });
+    });
+
+    // Overige verdedigers: dekken gespreid in het strafschopgebied/doelgebied.
+    const restDef = defAll.filter((p) => !wallSet.has(p.id));
+    restDef.forEach((p, i) => {
+      const depth = 3.5 + (i % 3) * 3;
+      const dy = (((i + 1) % 5) - 2) * 5;
+      m.set(p.id, {
+        x: clamp(gx + sign * depth, 2, PITCH.width - 2),
+        y: clamp(cy + dy, 5, PITCH.height - 5),
+      });
+    });
+
+    // Aanvallers: nemer staat al bij de bal; één biedt zich kort aan vlakbij de
+    // bal (aanlegger), de rest verzamelt voor het doel, een paar blijven achter.
+    const atk = this.players
+      .filter((p) => p.side === takingSide && !p.isKeeper && p.id !== takerId)
+      .sort((a, b) => roleAdvance(b.position) - roleAdvance(a.position));
+    const layoff = atk.length
+      ? atk.reduce((a, b) => (dist(a.pos, spot) < dist(b.pos, spot) ? a : b))
+      : null;
+    if (layoff) {
+      m.set(layoff.id, {
+        x: clamp(spot.x - toGoal.x * 2.5 + perp.x * 3, 2, PITCH.width - 2),
+        y: clamp(spot.y - toGoal.y * 2.5 + perp.y * 3, 4, PITCH.height - 4),
+      });
+    }
+    const boxSlots: [number, number][] = [
+      [7, -5], [7, 4], [10, -1], [12, -7], [11, 5], [14, 0],
+    ];
+    const backX = clamp(gx + sign * PITCH.width * 0.55, 6, PITCH.width - 6);
+    const boxers = atk.filter((p) => p !== layoff);
+    boxers.forEach((p, i) => {
+      if (i < boxSlots.length) {
+        const [d, dy] = boxSlots[i]!;
+        m.set(p.id, { x: clamp(gx + sign * d, 2, PITCH.width - 2), y: clamp(cy + dy, 4, PITCH.height - 4) });
+      } else {
+        m.set(p.id, { x: backX, y: clamp(cy + (i % 2 === 0 ? -10 : 10), 6, PITCH.height - 6) });
+      }
+    });
+
+    return m;
   }
 
   /**
@@ -1151,8 +1256,29 @@ export class MatchSim {
     const atk = this.players
       .filter((p) => p.side === takingSide && !p.isKeeper && p.id !== takerId)
       .sort((a, b) => roleAdvance(b.position) - roleAdvance(a.position));
+
+    // Korte-corner-optie: één speler (de dichtstbijzijnde bij de vlag) biedt zich
+    // vlakbij de hoekvlag aan, zodat de nemer 'm ook kort kan spelen.
+    let shortPlayer: PlayerEntity | null = null;
+    let shortBest = Infinity;
+    for (const p of atk) {
+      const dd = dist(p.pos, spot);
+      if (dd < shortBest) {
+        shortBest = dd;
+        shortPlayer = p;
+      }
+    }
+    const shortSpot: Vec2 | null = shortPlayer
+      ? {
+          x: clamp(atkGoalX + sign * 4.5, 2, PITCH.width - 2),
+          y: spot.y < cy ? Math.min(spot.y + 9, cy) : Math.max(spot.y - 9, cy),
+        }
+      : null;
+    if (shortPlayer && shortSpot) m.set(shortPlayer.id, shortSpot);
+
+    const boxers = atk.filter((p) => p !== shortPlayer);
     const backX = clamp(atkGoalX + sign * PITCH.width * 0.62, 6, PITCH.width - 6);
-    atk.forEach((p, i) => {
+    boxers.forEach((p, i) => {
       if (i < atkSlots.length) {
         const [d, dy] = atkSlots[i]!;
         m.set(p.id, slotPos(d, dy));
@@ -1164,9 +1290,32 @@ export class MatchSim {
 
     // Verdedigende ploeg: meeste spelers in de box (markeren), de twee meest
     // aanvallende blijven hoog als uitlaatklep voor de counter.
-    const def = this.players
+    let def = this.players
       .filter((p) => p.side === defendingSide && !p.isKeeper)
       .sort((a, b) => roleAdvance(a.position) - roleAdvance(b.position));
+
+    // Eén verdediger dekt de korte-corner-aanbieder: ga net aan de doel-kant van
+    // hem staan zodat de korte hoek niet vrij is.
+    if (shortSpot) {
+      let marker: PlayerEntity | null = null;
+      let markBest = Infinity;
+      for (const p of def) {
+        const dd = dist(p.pos, shortSpot);
+        if (dd < markBest) {
+          markBest = dd;
+          marker = p;
+        }
+      }
+      if (marker) {
+        const toGoal = normalize({ x: atkGoalX - shortSpot.x, y: PITCH.height / 2 - shortSpot.y });
+        m.set(marker.id, {
+          x: clamp(shortSpot.x + toGoal.x * 2.2, 2, PITCH.width - 2),
+          y: clamp(shortSpot.y + toGoal.y * 2.2, 4, PITCH.height - 4),
+        });
+        def = def.filter((p) => p !== marker);
+      }
+    }
+
     const outletX = clamp(atkGoalX + sign * PITCH.width * 0.5, 6, PITCH.width - 6);
     def.forEach((p, i) => {
       if (i < def.length - 2) {
@@ -1203,12 +1352,23 @@ export class MatchSim {
       this.restartTakerId = null;
     }
     this.restartTakingSide = takingSide;
-    this.restartReady = kind === "corner" ? CORNER_SETUP_PAUSE : RULES.restartPause;
+    const dangerFreekick =
+      kind === "freekick" && dist(spot, attackingGoal(takingSide)) < FREEKICK_DANGER_DIST;
+    this.restartReady =
+      kind === "corner" || dangerFreekick ? CORNER_SETUP_PAUSE : RULES.restartPause;
     this.restartIsKickoff = false;
     this.restartIsPenalty = kind === "penalty";
     this.restartKind = kind;
     // De nemer kijkt richting het doel (handig voor zowel mens als AI-penalty).
     if (taker) taker.facing = takingSide === "home" ? 0 : Math.PI;
+    // Mikbare hervatting (hoek/vrije trap/penalty): start het richt-pijltje
+    // richting het doel; de mens stelt het met links/rechts bij.
+    if (isAimableRestart(kind)) {
+      const goal = attackingGoal(takingSide);
+      this.restartAim = Math.atan2(goal.y - spot.y, goal.x - spot.x);
+    } else {
+      this.restartAim = null;
+    }
     this.ballProtectedFor = takingSide;
     this.phase = "deadball";
   }
@@ -1244,6 +1404,13 @@ export class MatchSim {
         this.restartReady <= 0 &&
         this.restartTakingSide !== null &&
         this.restartTakingSide === this.humanSide,
+      // Pijltje tonen zodra de mens de mikbare hervatting mag nemen.
+      restartAim:
+        this.phase === "deadball" &&
+        this.restartTakingSide === this.humanSide &&
+        this.restartAim !== null
+          ? this.restartAim
+          : null,
     };
   }
 }

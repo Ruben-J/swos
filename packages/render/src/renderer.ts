@@ -27,6 +27,7 @@ export class MatchRenderer {
   private world = new Container();
   private pitchLayer = new Graphics();
   private ballShadow = new Graphics();
+  private aimArrow = new Graphics();
   private ball = new Graphics();
   private players = new Map<string, PlayerNode>();
   private colors: Record<"home" | "away", TeamColors>;
@@ -47,6 +48,7 @@ export class MatchRenderer {
     this.app.stage.addChild(this.world);
     this.world.addChild(this.pitchLayer);
     this.world.addChild(this.ballShadow);
+    this.world.addChild(this.aimArrow);
     this.world.addChild(this.ball);
     this.drawPitch();
   }
@@ -228,8 +230,32 @@ export class MatchRenderer {
     this.ball.clear();
     this.ball.circle(bx, by - bz, 3.4).fill(0xffffff).stroke({ width: 1, color: 0x111111 });
 
+    // Richt-pijltje voor een mikbare hervatting (hoek/vrije trap/penalty).
+    this.aimArrow.clear();
+    if (snap.restartAim != null) {
+      this.drawAimArrow(bx, by, snap.restartAim);
+    }
+
     this.prev = snap;
     this.app.renderer.render(this.app.stage);
+  }
+
+  /** Klein geel richt-pijltje vanaf de bal in de mikrichting. */
+  private drawAimArrow(bx: number, by: number, angle: number): void {
+    const len = 34;
+    const tx = bx + Math.cos(angle) * len;
+    const ty = by + Math.sin(angle) * len;
+    const g = this.aimArrow;
+    g.moveTo(bx, by).lineTo(tx, ty).stroke({ width: 2.5, color: 0xffe14d, alpha: 0.95 });
+    // Punt.
+    const head = 7;
+    const a1 = angle + Math.PI * 0.82;
+    const a2 = angle - Math.PI * 0.82;
+    g.moveTo(tx, ty)
+      .lineTo(tx + Math.cos(a1) * head, ty + Math.sin(a1) * head)
+      .lineTo(tx + Math.cos(a2) * head, ty + Math.sin(a2) * head)
+      .lineTo(tx, ty)
+      .fill({ color: 0xffe14d, alpha: 0.95 });
   }
 
   resize(): void {
