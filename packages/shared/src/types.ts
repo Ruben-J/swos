@@ -137,6 +137,46 @@ export interface Contract {
   extensionOptionYears: number;
 }
 
+/** Een divisie (competitieniveau) binnen een land. Promotie/degradatie tussen
+ *  opeenvolgende tiers. Statisch deel van de wereld (verandert niet per seizoen). */
+export interface Division {
+  id: UUID;
+  countryCode: string;
+  countryName: string;
+  name: string;
+  /** 1 = hoogste niveau, 2 = tweede, enz. */
+  tier: number;
+  /** Aantal clubs dat promoveert naar tier-1 (relevant voor tier >= 2). */
+  promotionSlots: number;
+  /** Aantal clubs dat degradeert naar de lagere divisie. */
+  relegationSlots: number;
+}
+
+/** Een competitie-instantie: één seizoen van een divisie (of beker). Levert de
+ *  wedstrijden; de stand leiden we af uit de gespeelde wedstrijden. */
+export interface Competition {
+  id: UUID;
+  seasonId: UUID;
+  divisionId: UUID;
+  type: "league" | "cup";
+  name: string;
+  teamIds: UUID[];
+}
+
+/** Eén rij in een afgeleide ranglijst. */
+export interface StandingRow {
+  teamId: UUID;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  points: number;
+  rank: number;
+}
+
 export type MatchState = "scheduled" | "played" | "abandoned";
 
 export interface Match {
@@ -199,6 +239,8 @@ export interface CareerSave {
   };
   worldState: {
     activeSeasonId: UUID;
+    divisions: Division[];
+    competitions: Competition[];
     teams: Team[];
     players: Player[];
     contracts: Contract[];
