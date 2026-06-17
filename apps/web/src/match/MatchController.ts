@@ -76,14 +76,20 @@ export class MatchController {
     return this.sim;
   }
 
+  /** Veld staat 90° gedraaid (verticaal): schermbreedte toont de veldbreedte. */
+  private fieldRotation(): number {
+    return this.sim.currentHalf >= 2 ? Math.PI / 2 : -Math.PI / 2;
+  }
+
   private fitCamera(): void {
     if (!this.renderer) return;
     const w = this.renderer.app.renderer.width;
     const h = this.renderer.app.renderer.height;
     const pxPerUnit = 11;
     // Ingezoomde tv-camera: toon ~de helft van het veld i.p.v. het hele veld.
+    // Veld is 90° gedraaid -> schermbreedte/-hoogte mappen op veld-Y/-X (swap).
     this.camera.zoom = MATCH_ZOOM;
-    this.camera.setViewSize(w / (pxPerUnit * MATCH_ZOOM), h / (pxPerUnit * MATCH_ZOOM));
+    this.camera.setViewSize(h / (pxPerUnit * MATCH_ZOOM), w / (pxPerUnit * MATCH_ZOOM));
   }
 
   private frameIntent: PlayerIntent | null = null;
@@ -92,6 +98,13 @@ export class MatchController {
     // Lees input één keer per frame; consumeer edges alleen op de eerste substep.
     if (subStep === 0) {
       this.frameIntent = this.input.poll();
+      // Scherm-input -> wereld-richting: draai mee met de veld-rotatie zodat
+      // "omhoog" op het scherm de speler ook omhoog beweegt.
+      if (this.frameIntent) {
+        const rot = this.fieldRotation();
+        this.frameIntent.move = rotateVec(this.frameIntent.move, -rot);
+        this.frameIntent.aftertouch = rotateVec(this.frameIntent.aftertouch, -rot);
+      }
     }
     const intent = this.frameIntent;
     if (intent) {
@@ -139,3 +152,10 @@ export class MatchController {
 }
 
 export const HALF_LINE_X = PITCH.width / 2;
+
+/** Draai een vector over hoek a (rad). */
+function rotateVec(v: { x: number; y: number }, a: number): { x: number; y: number } {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+}

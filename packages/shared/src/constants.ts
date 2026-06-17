@@ -46,11 +46,11 @@ export const BALL = {
   /** Restitutie (stuiterbehoud) bij grondcontact op de z-as. */
   bounce: 0.55,
   /** Aftertouch-venster na een trap, in seconden. */
-  aftertouchWindow: 0.32,
+  aftertouchWindow: 0.55,
   /** Hoeveel curve aftertouch maximaal toevoegt (zijwaartse acceleratie). */
-  aftertouchCurve: 46,
+  aftertouchCurve: 55,
   /** Hoeveel hoogte (loft) aftertouch maximaal toevoegt. */
-  aftertouchLoft: 15,
+  aftertouchLoft: 24,
   /** Maximale grondsnelheid van de bal. */
   maxSpeed: 42,
   /** Controle-/dribbelafstand: binnen deze straal "kleeft" de bal licht. */

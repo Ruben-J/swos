@@ -110,11 +110,11 @@ export function tacticalTarget(
   // aanvallers diep vooruit — ook bij verdedigen (outlet voor een voorwaartse bal).
   let along: number;
   if (phase >= 0.5) {
-    along = roleAdvance(position) * 32; // aanval: iedereen op, aanvallers het meest
+    along = roleAdvance(position) * 20; // aanval: iedereen op, aanvallers het meest
   } else if (phase <= -0.3) {
-    along = cat === "attacker" ? 3 : cat === "midfielder" ? -12 : -9; // verdedigen
+    along = cat === "attacker" ? 2 : cat === "midfielder" ? -6 : -5; // verdedigen (compact)
   } else {
-    along = roleAdvance(position) * 8; // losse/neutrale bal
+    along = roleAdvance(position) * 5; // losse/neutrale bal
   }
   const advance = along * attackDirX;
 

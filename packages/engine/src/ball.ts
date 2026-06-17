@@ -61,12 +61,11 @@ export function applyAftertouch(ball: BallState, input: Vec2): void {
   const speed = len(ball.vel);
   if (speed < 0.01) return;
   const fwd = { x: ball.vel.x / speed, y: ball.vel.y / speed };
-  // Loodrechte component (links/rechts t.o.v. balrichting) -> curve.
+  // Alleen de ZIJWAARTSE (loodrechte) component buigt de bal (curve). Voor- en
+  // achterwaarts sturen doet niks — je kunt een getrapte bal niet versnellen,
+  // afremmen of optillen.
   const side = input.x * -fwd.y + input.y * fwd.x;
   ball.curve += side * BALL.aftertouchCurve * 0.016;
-  // Voorwaartse/achterwaartse component -> loft (omhoog duwen = hoger).
-  const lift = -(input.x * fwd.x + input.y * fwd.y);
-  if (lift > 0) ball.vz += lift * BALL.aftertouchLoft * 0.016;
 }
 
 /** Integreer de balfysica één sim-stap (dt seconden). */

@@ -6,17 +6,19 @@ import type { Position, Side } from "./types.js";
  * vanuit het perspectief "valt naar rechts aan" (home). x: 0=eigen doel,
  * 1=tegendoel. y: 0=boven, 1=onder. Voor away spiegelen we x.
  */
+// Compactere band: verdediging ~0.26, aanval ~0.65 i.p.v. de hele veldlengte,
+// zodat de linies dichter bij elkaar blijven (het blok schuift mee met de fase).
 const ANCHORS: Record<Position, Vec2> = {
-  GK: { x: 0.05, y: 0.5 },
+  GK: { x: 0.06, y: 0.5 },
   RB: { x: 0.28, y: 0.12 },
-  CB: { x: 0.2, y: 0.38 },
+  CB: { x: 0.26, y: 0.38 },
   LB: { x: 0.28, y: 0.88 },
   DM: { x: 0.38, y: 0.5 },
-  CM: { x: 0.5, y: 0.32 },
-  AM: { x: 0.6, y: 0.5 },
-  RW: { x: 0.7, y: 0.15 },
-  LW: { x: 0.7, y: 0.85 },
-  ST: { x: 0.78, y: 0.5 },
+  CM: { x: 0.46, y: 0.32 },
+  AM: { x: 0.54, y: 0.5 },
+  RW: { x: 0.61, y: 0.15 },
+  LW: { x: 0.61, y: 0.85 },
+  ST: { x: 0.66, y: 0.5 },
 };
 
 /**

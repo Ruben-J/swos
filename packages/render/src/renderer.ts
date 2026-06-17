@@ -186,11 +186,20 @@ export class MatchRenderer {
     const screenW = this.app.renderer.width;
     const screenH = this.app.renderer.height;
 
-    // Wereldcontainer positioneren rond camera-centrum.
+    // Veld verticaal: 1e helft valt home omhoog aan, 2e helft 180° gedraaid
+    // (teams wisselen van kant). Puur presentatie — de sim blijft horizontaal.
+    const rot = snap.half >= 2 ? Math.PI / 2 : -Math.PI / 2;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+
+    // Wereldcontainer positioneren rond camera-centrum, mét rotatie.
+    this.world.rotation = rot;
     this.world.scale.set(view.zoom);
+    const vx = view.center.x * u * view.zoom;
+    const vy = view.center.y * u * view.zoom;
     this.world.position.set(
-      screenW / 2 - view.center.x * u * view.zoom,
-      screenH / 2 - view.center.y * u * view.zoom,
+      screenW / 2 - (vx * cos - vy * sin),
+      screenH / 2 - (vx * sin + vy * cos),
     );
 
     const prev = this.prev;
@@ -204,6 +213,8 @@ export class MatchRenderer {
       const x = (pp ? lerp(pp.x, p.x, alpha) : p.x) * u;
       const y = (pp ? lerp(pp.y, p.y, alpha) : p.y) * u;
       node.container.position.set(x, y);
+      // Rugnummers rechtop houden ondanks de wereld-rotatie.
+      node.label.rotation = -rot;
 
       // Actieve-speler-ring.
       node.ring.clear();
@@ -228,7 +239,10 @@ export class MatchRenderer {
     this.ballShadow.clear();
     this.ballShadow.ellipse(bx, by, 4, 2.5).fill({ color: 0x000000, alpha: 0.3 });
     this.ball.clear();
-    this.ball.circle(bx, by - bz, 3.4).fill(0xffffff).stroke({ width: 1, color: 0x111111 });
+    // Hoogte (loft) altijd naar scherm-boven, ongeacht de wereld-rotatie.
+    const liftX = -bz * sin;
+    const liftY = -bz * cos;
+    this.ball.circle(bx + liftX, by + liftY, 3.4).fill(0xffffff).stroke({ width: 1, color: 0x111111 });
 
     // Richt-pijltje voor een mikbare hervatting (hoek/vrije trap/penalty).
     this.aimArrow.clear();

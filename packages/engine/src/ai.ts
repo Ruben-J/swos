@@ -511,11 +511,19 @@ function keeperCommand(
   const towardGoal = sign === 1 ? ball.vel.x < -6 : ball.vel.x > 6;
   const half = PITCH.goalWidth / 2 + 1.5;
 
-  // Inkomend schot op doel -> ZIJWAARTSE duik langs de lijn naar de HUIDIGE
-  // bal-y (reactief, geen perfecte anticipatie): een snel/goed geplaatst schot
-  // in de hoek loopt zo voor op de keeper en kan erin.
+  // Inkomend schot op doel -> ZIJWAARTSE duik langs de lijn. De keeper
+  // anticipeert gedeeltelijk op waar de bal de lijn kruist (60%), zodat hij
+  // hoekschoten kan halen — maar niet volledig (een perfect geplaatst schot kan
+  // er nog in).
   if (towardGoal && speed > 13 && Math.abs(ball.pos.x - ownGoal.x) < 22) {
-    const targetY = clamp(ball.pos.y, PITCH.height / 2 - half, PITCH.height / 2 + half);
+    let crossY = ball.pos.y;
+    const vx = ball.vel.x;
+    if (Math.abs(vx) > 1) {
+      const t = clamp((ownGoal.x - ball.pos.x) / vx, 0, 1.2);
+      crossY = ball.pos.y + ball.vel.y * t;
+    }
+    const aimY = ball.pos.y + (crossY - ball.pos.y) * 0.3;
+    const targetY = clamp(aimY, PITCH.height / 2 - half, PITCH.height / 2 + half);
     moveTo(cmd, gk, { x: goalLineX, y: targetY }, true);
     return cmd;
   }

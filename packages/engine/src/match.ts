@@ -75,6 +75,8 @@ export interface MatchSnapshot {
   score: { home: number; away: number };
   matchSeconds: number;
   matchMinute: number;
+  /** Helft (1 of 2) — de teams wisselen in de 2e helft van kant. */
+  half: number;
   phase: MatchPhase;
   possession: Side | null;
   activeId: string | null;
@@ -98,6 +100,10 @@ export class MatchSim {
   phase: MatchPhase = "kickoff";
   private phaseTimer = 0;
   private half = 1;
+  /** Huidige helft (1/2) — voor de presentatie-rotatie van het veld. */
+  get currentHalf(): number {
+    return this.half;
+  }
   private kickoffSide: Side = "home";
   private lastConcededSide: Side | null = null;
 
@@ -853,11 +859,23 @@ export class MatchSim {
       // Niet meteen je eigen uittrap/uitworp weer oppakken.
       if (this.ball.lastTouchId === p.id && this.ball.sinceKick < 0.7) continue;
 
-      const baseR = PLAYER.radius + BALL.radius + 0.05 + (p.stats.goalkeeping / 100) * 0.35;
+      // Afwerkkwaliteit van de schutter: een goede finisher plaatst 'm scherper,
+      // dus de keeper reikt er minder makkelijk bij en houdt 'm minder vaak vast.
+      const shooter = this.byId(this.ball.lastTouchId);
+      const finishing = shooter && shooter.side !== p.side ? shooter.stats.shooting : 50;
+      const finBonus = clamp((finishing - 55) / 45, 0, 1); // 0 bij ≤55, 1 bij 100
+
+      // Standaard pakt de keeper alleen ballen die hem (bijna) raken.
+      const baseR = PLAYER.radius + BALL.radius + 0.1 + (p.stats.goalkeeping / 100) * 0.18;
       const speed = len(this.ball.vel);
-      // Duikbereik: bij een snel schot reikt de keeper iets verder (duik).
-      const diveReach = Math.min(0.7, speed * 0.035);
-      const reach = baseR + diveReach;
+      // Duikbereik alléén als de bal richting het eigen doel gaat (een schot,
+      // ook in de hoek). Een bal die langs/weg/parallel rolt wordt niet
+      // "opgezogen" — die moet de keeper echt (bijna) raken (baseR).
+      const goalX = p.side === "home" ? 0 : PITCH.width;
+      const towardGoal = goalX === 0 ? this.ball.vel.x < -3 : this.ball.vel.x > 3;
+      const diveReach = towardGoal ? Math.min(0.75, speed * 0.035) : 0;
+      // Goede finisher legt 'm net buiten bereik (tikje erlangs).
+      const reach = baseR + diveReach - finBonus * 0.45;
       const d = dist(p.pos, this.ball.pos);
       if (d >= reach) continue;
 
@@ -869,11 +887,28 @@ export class MatchSim {
         p.stateTimer = 0.5;
       }
 
-      // Makkelijke bal (traag/middel, laag, geen strek) -> altijd klemvast.
-      const easy = speed < 14 && this.ball.z < 1.4 && stretch < 0.6;
-      // Anders: kans op klemvast daalt met snelheid, hoogte en strek.
+      // Een hard, goed geplaatst schot kan de keeper helemaal kloppen (de bal
+      // gaat er ongehinderd langs i.p.v. dat hij 'm raakt) — schaalt met
+      // afwerking en snelheid. Zo gaan ook strakke schoten er weleens in.
+      const beatChance = clamp(finBonus * (speed - 22) * 0.022, 0, 0.5);
+      if (towardGoal && this.rng.chance(beatChance)) {
+        if (diving) {
+          p.state = "dive";
+          p.stateTimer = 0.5;
+        }
+        return; // keeper geklopt, bal loopt door
+      }
+
+      // Makkelijke bal (traag/middel, laag, geen strek, zwakke finisher) -> klemvast.
+      const easy = speed < 14 && this.ball.z < 1.4 && stretch < 0.6 && finBonus < 0.3;
+      // Anders: kans op klemvast daalt met snelheid, hoogte, strek en afwerking.
       const catchProb =
-        0.8 + 0.3 * (p.stats.goalkeeping / 100) - speed * 0.011 - this.ball.z * 0.14 - stretch * 0.18;
+        0.72 +
+        0.3 * (p.stats.goalkeeping / 100) -
+        speed * 0.012 -
+        this.ball.z * 0.14 -
+        stretch * 0.18 -
+        finBonus * 0.3;
       const heldCleanly = easy || (this.ball.z < 2.4 && this.rng.chance(catchProb));
 
       if (heldCleanly) {
@@ -1105,6 +1140,7 @@ export class MatchSim {
   ): Map<string, Vec2> | null {
     if (kind === "corner") return this.cornerTargets(spot, takingSide, takerId);
     if (kind === "goalkick") return this.goalKickTargets(takingSide);
+    if (kind === "penalty") return this.penaltyTargets(takingSide, takerId);
     if (kind === "freekick") {
       // Alleen rond het strafschopgebied een gevaarlijke set-piece-opstelling
       // (muurtje + aanvallers voor het doel); elders gewoon doorspelen.
@@ -1112,6 +1148,43 @@ export class MatchSim {
       if (dGoal < FREEKICK_DANGER_DIST) return this.freekickTargets(spot, takingSide, takerId);
     }
     return null;
+  }
+
+  /**
+   * Strafschop-opstelling: alleen de nemer (op de stip) en de verdedigende
+   * keeper (op de lijn) staan in/bij het gebied. Alle andere veldspelers wachten
+   * aan de rand van het strafschopgebied (buiten de box, achter de stip) tot er
+   * getrapt is; daarna mogen ze op de rebound.
+   */
+  private penaltyTargets(takingSide: Side, takerId: string | null): Map<string, Vec2> {
+    const m = new Map<string, Vec2>();
+    const goal = attackingGoal(takingSide); // doel waarop geschoten wordt
+    const gx = goal.x;
+    const sign = gx === 0 ? 1 : -1; // het veld in vanaf dat doel
+    const cy = PITCH.height / 2;
+    const defendingSide = otherSide(takingSide);
+
+    // Verdedigende keeper op de doellijn.
+    const gk = this.players.find((p) => p.isKeeper && p.side === defendingSide);
+    if (gk) m.set(gk.id, { x: clamp(gx + sign * 0.6, 0, PITCH.width), y: cy });
+
+    // Alle veldspelers (beide ploegen) behalve de nemer wachten net buiten de
+    // box, gespreid in rijen aan de rand van het strafschopgebied.
+    const edgeX = gx + sign * (PITCH.penaltyBoxDepth + 2);
+    const waiters = this.players.filter((p) => !p.isKeeper && p.id !== takerId);
+    const perRow = 5;
+    const spacing = 6;
+    waiters.forEach((p, i) => {
+      const row = Math.floor(i / perRow);
+      const col = i % perRow;
+      const yy = cy + (col - (perRow - 1) / 2) * spacing;
+      m.set(p.id, {
+        x: clamp(edgeX + sign * row * 3.2, 2, PITCH.width - 2),
+        y: clamp(yy, 4, PITCH.height - 4),
+      });
+    });
+
+    return m;
   }
 
   /**
@@ -1355,7 +1428,9 @@ export class MatchSim {
     const dangerFreekick =
       kind === "freekick" && dist(spot, attackingGoal(takingSide)) < FREEKICK_DANGER_DIST;
     this.restartReady =
-      kind === "corner" || dangerFreekick ? CORNER_SETUP_PAUSE : RULES.restartPause;
+      kind === "corner" || kind === "penalty" || dangerFreekick
+        ? CORNER_SETUP_PAUSE
+        : RULES.restartPause;
     this.restartIsKickoff = false;
     this.restartIsPenalty = kind === "penalty";
     this.restartKind = kind;
@@ -1394,6 +1469,7 @@ export class MatchSim {
       score: { ...this.score },
       matchSeconds: this.matchSeconds,
       matchMinute: clamp(this.matchMinute(), 0, RULES.matchMinutes),
+      half: this.half,
       phase: this.phase,
       possession: this.controllingSide(),
       activeId: this.humanSide ? this.activeId[this.humanSide] : null,
