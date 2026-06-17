@@ -10,6 +10,16 @@ De technische hoofdles uit SWOS is dat de **“feel” belangrijker is dan fysis
 
 De carrièremodus moet dieper zijn dan het origineel. Het handboek noemt transfers, tactieken en clubfinanciën, maar beschrijft geen moderne contractonderhandeling, trainingsperiodisering, jeugdacademie, veroudering/pensioen of een rijk reputatiesysteem. Daarom is de aanbevolen productpositionering: **“SWOS-paced matches + FM-lite systems”**. De matchduur en UI moeten compact blijven, terwijl systemen als contracten, scouting, jeugd, trainingsfocus, budgetten, sponsorlogica, bestuurseisen en managerreputatie laagdrempelig maar betekenisvol zijn. citeturn3view0turn2view3
 
+> **Update 2026-06-17 (besluit gebruiker — overschrijft de oorspronkelijke "volledig fictieve" lijn hieronder):**
+> de data wordt gebaseerd op de **echte voetbalwereld** (competities/clubs/spelers) maar met
+> **verbasterde namen** — herkenbaar maar niet identiek (SWOS-stijl: "Manchester Red",
+> "Barcedona", "L. Mossi"), aanpasbaar via een editor. Grafische assets (sprites, logo's,
+> clubwapens, kits, audio) blijven **volledig origineel**. Dit draagt meer IP-/portretrechten-
+> risico dan een volledig fictieve wereld; bewust gekozen voor herkenbaarheid. Vóór een
+> commerciële/publieke launch hierop juridisch advies inwinnen. Zie `asset-origin-ledger.md`.
+>
+> De onderstaande oorspronkelijke juridische analyse blijft staan als achtergrond.
+
 Juridisch moet het project vanaf dag één op **originaliteit en afstand tot beschermde tekens/data** gebouwd worden. In Nederland ontstaan auteursrechten automatisch op games, muziek, kunst en software; merknamen en logo’s moeten apart geregistreerd worden om bescherming te krijgen; handelsnamen ontstaan door gebruik; en databanken kunnen onder databankenrecht vallen. BOIP en EUIPO maken ook expliciet duidelijk dat andermans merken in economisch verkeer niet zomaar gebruikt mogen worden. Voor een commercieel of publiek project betekent dit: **geen “Sensible Soccer” of “SWOS” als productnaam, geen overgenomen logo’s, geen gerecyclede sprites, geen gekopieerde muziek, en geen ongelicentieerde bulkovername van echte spelers-/club-/competitiedata**. citeturn27search0turn26search0turn26search1turn29search2turn30search0
 
 De realistische planning voor een klein senior team is ongeveer **7 tot 10 maanden voor een sterke singleplayer/career beta** en **10 tot 14 maanden als online multiplayer met authoritative backend in scope blijft**. De grootste projectrisico’s zijn niet rendering of infrastructure, maar **matchgevoel**, **AI-leesbaarheid**, **datascope**, **save-migraties**, en **IP/merkafstand**. Daarom moet de Claude-agent het werk uitvoeren in deze volgorde: eerst input, balgevoel, cameravoering en AI-support runs; dán HUD en menus; daarna career systems; en pas daarna online. citeturn21search0turn21search1turn5search5turn23search0
@@ -43,7 +53,7 @@ De v1-scope moet bestaan uit:
 | Cloud saves | Ja | Multiplayer cross-progression |
 | Online realtime 1v1 | Nice-to-have maar pas na local core | Ja |
 | Modding/custom database | Nee, alleen intern voorbereid | Ja |
-| Echte clubs/spelers/licenties | Nee | Alleen met licentie |
+| Echte clubs/spelers/licenties | Verbasterd (herkenbaar≠identiek), zie update bovenaan | Officiële licentie |
 
 Deze scopekeuze volgt uit het webplatform en uit de bekende infrastructuurtrade-offs rond realtime. Colyseus en Cloudflare Durable Objects zijn goede bouwstenen voor authoritative multiplayer, maar het ontwikkelen van goede realtime-voetbalcode brengt extra latency-, synchronisatie- en cheat-risico’s mee. Vercel Functions ondersteunen bovendien geen WebSocket-servergedrag, zodat een “alles-op-één-platform”-aanpak daar niet werkt. citeturn5search5turn5search0turn21search0turn21search1turn35search1turn35search2turn35search4
 
@@ -57,7 +67,7 @@ Omdat de opdracht expliciet zegt dat niet-gespecificeerde details **“no specif
 | Platformmodus | Primair webapp, optioneel PWA |
 | Monetisatie | Geen constraint; technische keuzes niet laten blokkeren door ads/IAP |
 | Doelmarkt | Desktop eerst, touch-support niet blokkeren |
-| Data | Fictieve standaarddatabase, importers/licenties later |
+| Data | Echte voetbalwereld met verbasterde namen (herkenbaar≠identiek), aanpasbaar via editor; officiële licenties later |
 | Online | Eerst local/offline core, daarna authoritative online 1v1 |
 
 Vite documenteert dat de productiebuild standaard mikt op **Baseline Widely Available** browsers van ongeveer de afgelopen 2,5 jaar, wat een goede moderne default is zolang je geen legacy-constraint hebt. citeturn7search5
