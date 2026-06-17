@@ -49,8 +49,8 @@ export const BALL = {
   aftertouchWindow: 0.55,
   /** Hoeveel curve aftertouch maximaal toevoegt (zijwaartse acceleratie). */
   aftertouchCurve: 55,
-  /** Hoeveel hoogte (loft) aftertouch maximaal toevoegt. */
-  aftertouchLoft: 24,
+  /** Hoeveel hoogte (loft) aftertouch toevoegt bij tégen de bal in sturen (lob). */
+  aftertouchLoft: 36,
   /** Maximale grondsnelheid van de bal. */
   maxSpeed: 42,
   /** Controle-/dribbelafstand: binnen deze straal "kleeft" de bal licht. */

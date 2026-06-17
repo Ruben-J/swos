@@ -22,6 +22,10 @@ function makePlayers(prefix: string): MatchPlayerSetup[] {
     id: `${prefix}-${i}`,
     shirtNumber: i + 1,
     position,
+    firstName: "Test",
+    lastName: `Speler${i}`,
+    hairColor: "#2e2018",
+    skinColor: "#e6b48c",
     stats: {
       pace: 60,
       passing: 60,

@@ -93,17 +93,6 @@ export function MatchScreen({ config, onExit }: Props) {
             Terug
           </button>
         </div>
-        <div className="match-controls">
-          <div>
-            <kbd>WASD</kbd> / pijltjes &mdash; bewegen
-          </div>
-          <div>
-            <kbd>X</kbd> passen &middot; <kbd>Z</kbd> schieten (langer = harder/hoger)
-          </div>
-          <div>
-            <kbd>Shift</kbd> sprint &middot; tijdens schot sturen = effect
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -129,8 +118,10 @@ function PlayerCard({ player, team, align, human, stamina, exhausted }: CardProp
         {player.shirtNumber}
       </div>
       <div className="pc-info">
+        <div className="pc-name">
+          {player.firstName[0]}. {player.lastName}
+        </div>
         <div className="pc-line">
-          <span className="pc-team">{team.shortName}</span>
           <span className="pc-pos">{player.position}</span>
           {player.hasBall && <span className="pc-ball">●</span>}
         </div>

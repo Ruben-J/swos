@@ -216,6 +216,13 @@ button.btn:disabled {
   align-items: flex-end;
 }
 
+.pc-name {
+  font-weight: 700;
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .pc-line {
   display: flex;
   align-items: center;

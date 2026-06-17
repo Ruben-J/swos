@@ -1,8 +1,11 @@
-import { PITCH, clamp, dist, distSq, len, normalize, type Vec2 } from "@pitch/shared";
+import { BALL, PITCH, clamp, dist, distSq, len, normalize, type Vec2 } from "@pitch/shared";
 import { projectBallPos } from "./ball.js";
 import type { BallState, PlayerEntity, Side } from "./types.js";
 import { attackingGoal, defendingGoal, dirTo, playerMaxSpeed } from "./player.js";
 import { DEFAULT_TACTICS, rolePressing, tacticalTarget, type TeamTactics } from "./tactics.js";
+
+/** Lathoogte (m) — gespiegeld aan CROSSBAR_HEIGHT in match.ts. */
+const CROSSBAR_HEIGHT = 2.44;
 
 export interface KickRequest {
   dir: Vec2;
@@ -36,6 +39,7 @@ export function nearestTeammateInCone(
   facing: number,
   coneRad = Math.PI * 0.55,
   maxDist = 45,
+  angleWeight = 14,
 ): PlayerEntity | null {
   let best: PlayerEntity | null = null;
   let bestScore = Infinity;
@@ -50,7 +54,8 @@ export function nearestTeammateInCone(
     const cos = (dx * fx + dy * fy) / d;
     const ang = Math.acos(Math.max(-1, Math.min(1, cos)));
     if (ang > coneRad) continue;
-    const score = ang * 14 + d;
+    // Hoek zwaarder laten wegen = sterker in de gestuurde richting kiezen.
+    const score = ang * angleWeight + d;
     if (score < bestScore) {
       bestScore = score;
       best = p;
@@ -170,6 +175,10 @@ export interface TeamAiPlan {
  *  de linie nooit op/achter de keeper komt; cap rond de middenlijn. */
 const DEF_LINE_HARD_MIN = 6;
 const DEF_LINE_PUSH_MAX = 46;
+/** In balbezit duwt de hele linie op (compact blok): de achterhoede zakt niet
+ *  terug op een terugspeelbal, maar schuift mee naar voren zodat de ploeg kort
+ *  blijft en de spitsen niet alleen voorin achterblijven. */
+const DEF_LINE_POSSESSION_PUSH = 32;
 /** Mark alleen tegenstanders rond de bal (de actieve zone van het veld). */
 const MARK_BALL_RADIUS = 38;
 /** Verdediger pakt alleen op als de man redelijk dichtbij is, anders houdt hij vorm. */
@@ -223,7 +232,14 @@ export function computeTeamPlan(
   // ligt de bal op het middenveld, dan staat de linie ook hoger (en zet zo de
   // hoog blijvende aanvallers buitenspel) i.p.v. terug te zakken op de keeper.
   const ballDist = side === "home" ? ball.pos.x : PITCH.width - ball.pos.x;
-  const lineFloor = clamp(ballDist * 0.55, DEF_LINE_HARD_MIN, DEF_LINE_PUSH_MAX);
+  // In balbezit (ook bij een terugspeelbal, phase ~0.7+) houdt de linie een hoge
+  // ondergrens aan: ze loopt mee naar voren i.p.v. terug te zakken op de keeper.
+  const possessionFloor = phase >= 0.7 ? DEF_LINE_POSSESSION_PUSH : 0;
+  const lineFloor = clamp(
+    Math.max(ballDist * 0.55, possessionFloor),
+    DEF_LINE_HARD_MIN,
+    DEF_LINE_PUSH_MAX,
+  );
   for (const p of players) {
     if (p.side !== side || p.isKeeper) continue;
     const t = targets.get(p.id);
@@ -285,6 +301,28 @@ export function computeTeamPlan(
       if (best) {
         marks.set(best.id, o.id);
         usedDef.add(best.id);
+      }
+    }
+
+    // Dubbele dekking dichtbij het eigen doel: heeft de tegenstander de bal in
+    // onze gevaarlijke zone én is er nog een vrije verdediger (niemand anders te
+    // dekken), zet er dan een tweede man bij op de baldrager.
+    const ownGoal = defendingGoal(side);
+    const nearOwnGoal = dist(ball.pos, ownGoal) < 34;
+    if (nearOwnGoal && carrierId) {
+      let extra: PlayerEntity | null = null;
+      let bestD = MARK_REACH * MARK_REACH;
+      for (const d of outfield) {
+        if (usedDef.has(d.id)) continue;
+        const dd = distSq(d.pos, ball.pos);
+        if (dd < bestD) {
+          bestD = dd;
+          extra = d;
+        }
+      }
+      if (extra) {
+        marks.set(extra.id, carrierId);
+        usedDef.add(extra.id);
       }
     }
   }
@@ -413,20 +451,27 @@ export function computeAiCommand(
   if (markId) {
     const man = opponents.find((o) => o.id === markId);
     if (man) {
+      // Dichtbij het eigen doel verdedigt de ploeg agressiever: dichter op de
+      // man en eerder een tackle.
+      const nearOwnGoal = dist(ball.pos, ownGoal) < 34;
       const toGoal = normalize({ x: ownGoal.x - man.pos.x, y: ownGoal.y - man.pos.y });
       if (ball.ownerId === man.id) {
         // Hij heeft de bal: containment-druk net aan de doel-kant, niet erlangs.
-        const press: Vec2 = { x: man.pos.x + toGoal.x * 1.4, y: man.pos.y + toGoal.y * 1.4 };
+        const standoff = nearOwnGoal ? 0.9 : 1.4;
+        const press: Vec2 = {
+          x: man.pos.x + toGoal.x * standoff,
+          y: man.pos.y + toGoal.y * standoff,
+        };
         moveTo(cmd, player, press, dist(player.pos, press) > 3);
-        if (dist(player.pos, man.pos) < 1.7) cmd.tackle = true;
+        if (dist(player.pos, man.pos) < (nearOwnGoal ? 2.1 : 1.7)) cmd.tackle = true;
       } else {
-        // Geen bal: goal-zijde positie met ruimte (klaar om in te grijpen),
-        // maar niet achter de eigen doellijn/keeper.
-        const gap = 4.5;
+        // Geen bal: goal-zijde positie; krap dekken dichtbij het doel, anders
+        // met wat ruimte. Niet achter de eigen doellijn/keeper.
+        const gap = nearOwnGoal ? 2.4 : 4.5;
         const mx = man.pos.x + toGoal.x * gap;
         const x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
         const mark: Vec2 = { x, y: man.pos.y + toGoal.y * gap };
-        moveTo(cmd, player, mark, dist(player.pos, mark) > 6);
+        moveTo(cmd, player, mark, dist(player.pos, mark) > (nearOwnGoal ? 3 : 6));
       }
       return cmd;
     }
@@ -480,9 +525,17 @@ function onBallCommand(
     return cmd;
   }
 
-  // Pass zoeken (lane-aware, voorwaarts).
+  // Is de dribbel-lijn naar voren (richting doel) geblokkeerd door een
+  // tegenstander? Alleen dan (of onder druk) zoeken we een pass; in de vrije
+  // ruimte dribbelt de speler zelf op i.p.v. de bal meteen weg te tikken.
+  const goalDir = dirTo(player, myGoal);
+  const ahead: Vec2 = { x: player.pos.x + goalDir.x * 7, y: player.pos.y + goalDir.y * 7 };
+  const laneAheadBlocked =
+    laneBlocked(player.pos, ahead, opponents, 2.4) ||
+    opponents.some((o) => dist(o.pos, ahead) < 3.5);
+
   const mate = chooseBestPass(players, player, opponents);
-  if (mate && (pressure || dist(player.pos, mate.pos) > 10)) {
+  if (mate && (pressure || laneAheadBlocked)) {
     const d = dist(player.pos, mate.pos);
     cmd.kick = {
       dir: dirTo(player, mate.pos),
@@ -495,7 +548,7 @@ function onBallCommand(
   }
 
   // Dribbel richting doel; wijk licht uit bij directe druk.
-  let dir = dirTo(player, myGoal);
+  let dir = goalDir;
   if (pressure) {
     const away = normalize({ x: player.pos.x - pressure.pos.x, y: player.pos.y - pressure.pos.y });
     dir = normalize({ x: dir.x + away.x * 0.6, y: dir.y + away.y * 0.6 });
@@ -525,13 +578,35 @@ function keeperCommand(
   }
 
   const sign = ownGoal.x === 0 ? 1 : -1;
-  const goalLineX = ownGoal.x + sign * 2.5;
+  const goalLineX = ownGoal.x + sign * 1.8;
   const speed = len(ball.vel);
   const towardGoal = sign === 1 ? ball.vel.x < -6 : ball.vel.x > 6;
   const half = PITCH.goalWidth / 2 + 1.5;
+  const airborne = ball.z > 0.5 || ball.vz > 2;
 
-  // Inkomend schot op doel -> ZIJWAARTSE duik langs de lijn. De keeper
-  // anticipeert gedeeltelijk op waar de bal de lijn kruist (60%), zodat hij
+  // Inkomende LUCHTBAL op doel (hoge lob/voorzet) -> de keeper voorspelt waar
+  // én op welke hoogte de bal de doellijn kruist (parabool), en gaat er VOL
+  // onder staan om 'm te claimen i.p.v. blind zijwaarts te duiken. Gaat de bal
+  // over de lat, dan blijft hij rustig centraal.
+  if (towardGoal && airborne && Math.abs(ball.pos.x - ownGoal.x) < 26) {
+    const vx = ball.vel.x;
+    const t = clamp((ownGoal.x - ball.pos.x) / vx, 0, 2.0);
+    const crossY = ball.pos.y + ball.vel.y * t;
+    const crossZ = ball.z + ball.vz * t - 0.5 * BALL.gravity * t * t;
+    if (crossZ > CROSSBAR_HEIGHT + 0.4) {
+      // Gaat over: niet meeduiken, centraal blijven.
+      moveTo(cmd, gk, { x: goalLineX, y: PITCH.height / 2 }, false);
+      return cmd;
+    }
+    const targetY = clamp(crossY, PITCH.height / 2 - half, PITCH.height / 2 + half);
+    // Iets uitkomen om de bal te plukken zodra hij binnen bereik daalt.
+    const claimX = ownGoal.x + sign * (ball.z > 1.6 ? 3.5 : 2.5);
+    moveTo(cmd, gk, { x: claimX, y: targetY }, true);
+    return cmd;
+  }
+
+  // Inkomend GROND-schot op doel -> ZIJWAARTSE duik langs de lijn. De keeper
+  // anticipeert gedeeltelijk op waar de bal de lijn kruist (30%), zodat hij
   // hoekschoten kan halen — maar niet volledig (een perfect geplaatst schot kan
   // er nog in).
   if (towardGoal && speed > 13 && Math.abs(ball.pos.x - ownGoal.x) < 22) {
@@ -541,7 +616,7 @@ function keeperCommand(
       const t = clamp((ownGoal.x - ball.pos.x) / vx, 0, 1.2);
       crossY = ball.pos.y + ball.vel.y * t;
     }
-    const aimY = ball.pos.y + (crossY - ball.pos.y) * 0.3;
+    const aimY = ball.pos.y + (crossY - ball.pos.y) * 0.12;
     const targetY = clamp(aimY, PITCH.height / 2 - half, PITCH.height / 2 + half);
     moveTo(cmd, gk, { x: goalLineX, y: targetY }, true);
     return cmd;
@@ -554,14 +629,16 @@ function keeperCommand(
     return cmd;
   }
 
-  // Standaard: op de hoek-bisectrice (lijn bal -> doelmidden). Bij een zijbal
-  // blijft de keeper zo meer centraal i.p.v. bij de paal te gaan staan.
+  // Standaard: vlak voor de doellijn, sterk gecentreerd. De keeper schuift maar
+  // een beetje met de bal mee in de breedte (niet naar de paal) en komt
+  // nauwelijks uit — zo staat hij zelden "perfect", waardoor een strak schot in
+  // de hoek er nog langs kan.
   const gc = { x: ownGoal.x, y: PITCH.height / 2 };
   const toBall = normalize({ x: ball.pos.x - gc.x, y: ball.pos.y - gc.y });
-  const outDist = 3.5;
+  const outDist = 2.6; // beperkt uitkomen om de hoek wat af te dekken
   const target: Vec2 = {
     x: gc.x + toBall.x * outDist,
-    y: clamp(gc.y + toBall.y * outDist, PITCH.height / 2 - 6, PITCH.height / 2 + 6),
+    y: clamp(gc.y + toBall.y * outDist * 0.5, PITCH.height / 2 - 4, PITCH.height / 2 + 4),
   };
   moveTo(cmd, gk, target, len({ x: target.x - gk.pos.x, y: target.y - gk.pos.y }) > 2.5);
   return cmd;

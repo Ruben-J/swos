@@ -108,9 +108,15 @@ export function tacticalTarget(
   // Verplaatsing langs de aanvalsas (units). De ploeg blijft gestrekt over het
   // veld i.p.v. samen te klitten: verdedigers achter, middenvelders midden,
   // aanvallers diep vooruit — ook bij verdedigen (outlet voor een voorwaartse bal).
+  // Ligt de bal in de aanvallende derde (in balbezit)?
+  const ownGoalX = side === "home" ? 0 : PITCH.width;
+  const ballAdvance = Math.abs(ball.x - ownGoalX) / PITCH.width; // 0..1, hoger = dieper
+  const finalThird = phase >= 0.5 && ballAdvance > 0.62;
+
   let along: number;
   if (phase >= 0.5) {
-    along = roleAdvance(position) * 20; // aanval: iedereen op, aanvallers het meest
+    // Aanval: iedereen op; in de laatste derde duiken aanvallers de box in.
+    along = roleAdvance(position) * 20 + (finalThird && cat === "attacker" ? 12 : 0);
   } else if (phase <= -0.3) {
     along = cat === "attacker" ? 2 : cat === "midfielder" ? -6 : -5; // verdedigen (compact)
   } else {
@@ -121,10 +127,12 @@ export function tacticalTarget(
   // Territoriaal meeschuiven met de bal (compactheid), sterker in balbezit.
   const compact = phase >= 0.5 ? 0.34 + tactics.lineHeight * 0.16 : 0.18 + tactics.lineHeight * 0.1;
   const ballShiftX = (ball.x - PITCH.width / 2) * compact;
-  // De hele formatie schuift duidelijk mee in de breedte richting de bal: ligt
-  // de bal onderin, dan zakt het blok mee naar onder en schuiven de links
-  // (boven) gepositioneerde spelers een stuk naar de bal toe.
-  const ballShiftY = (ball.y - PITCH.height / 2) * (0.32 + (1 - tactics.width) * 0.18);
+  // Het blok schuift in de breedte mee met de bal — maar AANVALLERS houden hun
+  // breedte (minder meeschuiven) zodat ze de box spreiden en de verre paal
+  // bezetten i.p.v. samen te klitten aan de balzijde.
+  const widthHold = cat === "attacker" ? 0.4 : 1;
+  const ballShiftY =
+    (ball.y - PITCH.height / 2) * (0.32 + (1 - tactics.width) * 0.18) * widthHold;
 
   const x = clamp(anchor.x + advance + ballShiftX, 2, PITCH.width - 2);
   const y = clamp(anchor.y + ballShiftY, 2, PITCH.height - 2);

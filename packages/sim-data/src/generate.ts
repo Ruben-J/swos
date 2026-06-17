@@ -3,6 +3,11 @@ import type { MatchPlayerSetup, MatchPlayerStats, TeamSetup } from "@pitch/engin
 import { FORMATIONS } from "@pitch/engine";
 import { CITIES, CLUB_CORE, CLUB_PREFIX, FIRST_NAMES, LAST_NAMES } from "./names.js";
 
+/** Haarkleuren (zwart/bruin/blond/rood/grijs). */
+const HAIR_COLORS = ["#1b1b1b", "#2e2018", "#5a3a1e", "#8a5a2b", "#c8943f", "#d9c27a", "#a23b1e", "#9a9a9a"];
+/** Huidtinten. */
+const SKIN_TONES = ["#f1c9a5", "#e6b48c", "#d49a6a", "#a9714b", "#8a5a3a", "#6b4327"];
+
 const SHIRT_PALETTE = [
   ["#d4382f", "#ffffff"],
   ["#1f4ed8", "#ffd23f"],
@@ -52,10 +57,27 @@ export function generateTeam(rng: Rng, opts: GenerateTeamOptions = {}): TeamSetu
   const formationName = rng.pick(formationNames);
   const formation = FORMATIONS[formationName] as Position[];
 
+  // Unieke achternamen binnen het team; voornamen mogen herhalen.
+  const usedLast = new Set<string>();
+  const pickLast = (): string => {
+    for (let tries = 0; tries < 30; tries++) {
+      const ln = rng.pick(LAST_NAMES);
+      if (!usedLast.has(ln)) {
+        usedLast.add(ln);
+        return ln;
+      }
+    }
+    return rng.pick(LAST_NAMES);
+  };
+
   const players: MatchPlayerSetup[] = formation.map((position, i) => ({
     id: rngId(rng),
     shirtNumber: i + 1,
     position,
+    firstName: rng.pick(FIRST_NAMES),
+    lastName: pickLast(),
+    hairColor: rng.pick(HAIR_COLORS),
+    skinColor: rng.pick(SKIN_TONES),
     stats: makeStats(rng, position, quality),
   }));
 

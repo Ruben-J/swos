@@ -5,6 +5,7 @@ import {
   PLAYER,
   RULES,
   Rng,
+  angleOf,
   clamp,
   dist,
   len,
@@ -60,6 +61,10 @@ export interface MatchSnapshotPlayer {
   side: Side;
   shirtNumber: number;
   position: Position;
+  firstName: string;
+  lastName: string;
+  hairColor: string;
+  skinColor: string;
   x: number;
   y: number;
   facing: number;
@@ -170,6 +175,10 @@ export class MatchSim {
         side,
         shirtNumber: ps.shirtNumber,
         position: ps.position,
+        firstName: ps.firstName,
+        lastName: ps.lastName,
+        hairColor: ps.hairColor,
+        skinColor: ps.skinColor,
         isKeeper: ps.position === "GK",
         stats: ps.stats,
         anchor,
@@ -320,6 +329,11 @@ export class MatchSim {
         this.ball.ownerId === p.id &&
         this.keeperHoldTime < KEEPER_DISTRIBUTE_DELAY;
       if (aiKeeperHolding) cmd.kick = null;
+
+      // AI-keeper: fysieke duik naar een inkomend schot (impuls); de dive-state
+      // onderdrukt daarna zijn normale beweging in applyCommand, zodat de impuls
+      // hem ballistisch naar het kruispunt draagt.
+      if (!isHumanActive && p.isKeeper) this.tryKeeperDive(p);
 
       // AI maakt af en toe een overtreding: een verdediger die dicht op de
       // baldragende tegenstander zit (lichaam binnen bereik) terwijl de bal net
@@ -483,24 +497,37 @@ export class MatchSim {
             ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.5 ? 4 : 0), curve: 0, targetId: tId }
             : { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0, targetId: tId };
         } else if (shoot) {
-          // Schot ALTIJD in de kijkrichting (facing): die is vloeiend (uit de
-          // gesmoothde snelheid), dus je kunt ook tussen de 8 toetsrichtingen in
-          // mikken. Langer ingehouden (Z) = harder én hoger; bijsturen via aftertouch.
-          const charge = clamp(hold / 0.5, 0, 1);
+          // Een schot is ALTIJD zo hard als deze speler kan (op basis van zijn
+          // shooting-stat) — een korte tik is dus al een vol schot. Langer
+          // inhouden doet alleen íets met de hoogte; echte hoogte maak je los
+          // met aftertouch (tégen de balrichting in sturen).
+          const sh = p.stats.shooting / 100;
+          const full = 30 + sh * 16; // hardste schot van deze speler
+          // Een normale tik = al een vol schot (bereikt vol rond 0.15s). Een
+          // ECHT korte tik tikt de bal alleen even voor je uit (zacht).
+          const ramp = clamp(hold / 0.15, 0, 1);
+          const power = 8 + ramp * (full - 8);
+          const lift = clamp((hold - 0.15) / 0.5, 0, 1); // pas daarna ietsje hoger
           cmd.kick = {
             dir: { x: Math.cos(p.facing), y: Math.sin(p.facing) },
-            // Kort tikje = zacht schot; langer inhouden = veel harder.
-            power: 13 + charge * 25 + (p.stats.shooting / 100) * 8,
-            // Veel meer hoogte bij langer inhouden (echte lob over verdedigers).
-            loft: 1 + charge * 13,
+            power,
+            loft: ramp * 0.4 + lift * 2.4,
             curve: 0,
           };
         } else {
-          // Korte pass (X) naar dichtstbijzijnde teamgenoot in kegel.
-          const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir));
+          // Pass (X) naar de teamgenoot in de gestuurde richting: strakke kegel
+          // + zwaar hoekgewicht, zodat de richting voorgaat op pure nabijheid.
+          const mate = nearestTeammateInCone(
+            this.players,
+            p,
+            aimAngle(aimDir),
+            Math.PI * 0.42,
+            48,
+            34,
+          );
           const dir = mate ? dirTo(p, mate.pos) : aimDir;
           const d = mate ? dist(p.pos, mate.pos) : 14;
-          cmd.kick = { dir, power: 13 + Math.min(14, d * 0.5), loft: 0, curve: 0, targetId: mate?.id ?? null };
+          cmd.kick = { dir, power: 13 + Math.min(15, d * 0.5), loft: 0, curve: 0, targetId: mate?.id ?? null };
         }
       } else if (dist(p.pos, this.ball.pos) < 1.3 && this.ball.z < 1.5) {
         // Losse bal aan de voet: one-touch (X = pass, Z = clear).
@@ -522,17 +549,48 @@ export class MatchSim {
   }
 
   private applyCommand(p: PlayerEntity, cmd: PlayerCommand, dt: number): void {
-    // Een duikende keeper ligt nog: hij komt pas overeind als de dive-timer
-    // afloopt (hij beweegt niet direct door na een redding/parry). Wel de bal
-    // blijven dragen als hij 'm vasthad.
+    // Een duikende keeper: zijn duik-impuls draagt hem BALLISTISCH (constante
+    // snelheid) naar het kruispunt — niet afremmen, anders komt hij niet op tijd.
+    // Hij stuurt niet meer bij (een duik is een commitment). Daarna komt hij pas
+    // overeind als de dive-timer afloopt.
     if (p.isKeeper && p.state === "dive" && p.stateTimer > 0 && this.ball.ownerId !== p.id) {
-      cmd.move = { x: 0, y: 0 };
-      cmd.sprint = false;
-      cmd.tackle = false;
+      // Duik tot het eindpunt en stop daar — niet ver voorbij de bal doorschieten.
+      const tgt = p.diveTarget;
+      if (tgt) {
+        const toX = tgt.x - p.pos.x;
+        const toY = tgt.y - p.pos.y;
+        const remain = Math.hypot(toX, toY);
+        const stepLen = len(p.vel) * dt;
+        if (remain <= stepLen + 0.02) {
+          // Bereikt: zet op het doel en blijf liggen (geen snelheid meer).
+          p.pos.x = tgt.x;
+          p.pos.y = tgt.y;
+          p.vel.x = 0;
+          p.vel.y = 0;
+        } else {
+          p.pos.x += p.vel.x * dt;
+          p.pos.y += p.vel.y * dt;
+        }
+      } else {
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+      }
+      p.pos.x = clamp(p.pos.x, -PITCH.margin, PITCH.width + PITCH.margin);
+      p.pos.y = clamp(p.pos.y, -PITCH.margin, PITCH.height + PITCH.margin);
+      // Keeper blijft ook tijdens de duik naar de bal kijken (duik = zijwaarts).
+      p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+      p.stateTimer = Math.max(0, p.stateTimer - dt);
+      return;
     }
 
     // Beweging.
     moveTowards(p, cmd.move, cmd.sprint, dt);
+
+    // Een keeper kijkt altijd naar de bal (behalve als hij 'm zelf draagt en
+    // uittrapt) — zo blijft hij oogcontact houden en duikt hij zijwaarts.
+    if (p.isKeeper && this.ball.ownerId !== p.id) {
+      p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+    }
 
     // Bal dragen: licht voor de speler uit "kleven".
     if (this.ball.ownerId === p.id && this.ball.sinceKick > 0.12) {
@@ -878,6 +936,50 @@ export class MatchSim {
   }
 
   /**
+   * Fysieke duik: bij een inkomend schot voorspelt de AI-keeper waar de bal zijn
+   * lijn kruist en geeft zichzelf één impuls die kant op. Hij redt alleen als zijn
+   * lijf de bal daarna echt raakt (keeperSaves) — de duik bepaalt of hij er komt.
+   * Een hard/ver geplaatst schot haalt hij zo niet (duiksnelheid is begrensd).
+   */
+  private tryKeeperDive(p: PlayerEntity): void {
+    if (p.state === "dive") return; // al aan het duiken
+    if (this.ball.ownerId === p.id) return;
+    if (this.ball.z > 2.6) return;
+    const goalX = p.side === "home" ? 0 : PITCH.width;
+    const sign = goalX === 0 ? 1 : -1;
+    const vx = this.ball.vel.x;
+    const towardGoal = sign === 1 ? vx < -6 : vx > 6;
+    if (!towardGoal) return;
+    const speed = len(this.ball.vel);
+    if (speed < 14) return;
+    if (Math.abs(this.ball.pos.x - goalX) > 22) return;
+
+    const lineX = goalX + sign * 1.3;
+    const t = (lineX - this.ball.pos.x) / vx;
+    if (t < 0.02 || t > 1.0) return; // te laat of nog te ver weg
+    const crossY = this.ball.pos.y + this.ball.vel.y * t;
+    // Mist het doel sowieso? Dan niet duiken.
+    const top = PITCH.height / 2 - PITCH.goalWidth / 2 - 1.5;
+    const bot = PITCH.height / 2 + PITCH.goalWidth / 2 + 1.5;
+    if (crossY < top || crossY > bot) return;
+
+    const gapX = lineX - p.pos.x;
+    const gapY = crossY - p.pos.y;
+    const gap = Math.hypot(gapX, gapY);
+    if (gap < 0.5) return; // staat al goed, gewoon blijven staan
+    const dir = { x: gapX / gap, y: gapY / gap };
+    // Duiksnelheid begrensd door keeperskwaliteit: betere keeper reikt verder.
+    const diveSpeed = 11 + (p.stats.goalkeeping / 100) * 6; // 11..17 u/s
+    const need = gap / Math.max(0.08, t);
+    const v = Math.min(diveSpeed, need);
+    p.vel.x = dir.x * v;
+    p.vel.y = dir.y * v;
+    p.diveTarget = { x: lineX, y: crossY };
+    p.state = "dive";
+    p.stateTimer = 0.45;
+  }
+
+  /**
    * Keeperredding: binnen (duik)bereik pakt de keeper de bal. Snelle/hoge/ver
    * uitgestrekte ballen houdt hij niet klemvast maar bokst/parreert hij weg
    * (losse rebound); makkelijke ballen vangt hij vast (beschermd balbezit).
@@ -895,17 +997,18 @@ export class MatchSim {
       const finishing = shooter && shooter.side !== p.side ? shooter.stats.shooting : 50;
       const finBonus = clamp((finishing - 55) / 45, 0, 1); // 0 bij ≤55, 1 bij 100
 
-      // Standaard pakt de keeper alleen ballen die hem (bijna) raken.
-      const baseR = PLAYER.radius + BALL.radius + 0.1 + (p.stats.goalkeeping / 100) * 0.18;
+      // De keeper redt ALLEEN met zijn lijf: geen magisch duikbereik op afstand.
+      // Het poppetje moet de bal echt raken (binnen zijn straal). Wil hij een
+      // hoekschot halen, dan moet hij er fysiek voor duiken/lopen (AI-laag).
+      // Lijf + armbereik van de keeper (armen tellen als "het poppetje zelf" —
+      // geen magie op afstand, wel iets meer dan een veldspeler-straal).
+      const baseR = PLAYER.radius + BALL.radius + 0.1 + (p.stats.goalkeeping / 100) * 0.6;
       const speed = len(this.ball.vel);
-      // Duikbereik alléén als de bal richting het eigen doel gaat (een schot,
-      // ook in de hoek). Een bal die langs/weg/parallel rolt wordt niet
-      // "opgezogen" — die moet de keeper echt (bijna) raken (baseR).
       const goalX = p.side === "home" ? 0 : PITCH.width;
       const towardGoal = goalX === 0 ? this.ball.vel.x < -3 : this.ball.vel.x > 3;
-      const diveReach = towardGoal ? Math.min(0.75, speed * 0.035) : 0;
-      // Goede finisher legt 'm net buiten bereik (tikje erlangs).
-      const reach = baseR + diveReach - finBonus * 0.45;
+      // Een goede finisher legt 'm scherp in de hoek: minimaal effect, want het
+      // gaat nu puur om lichaamscontact.
+      const reach = baseR - finBonus * 0.15;
       const d = dist(p.pos, this.ball.pos);
       if (d >= reach) continue;
 
@@ -939,7 +1042,11 @@ export class MatchSim {
         this.ball.z * 0.14 -
         stretch * 0.18 -
         finBonus * 0.3;
-      const heldCleanly = easy || (this.ball.z < 2.4 && this.rng.chance(catchProb));
+      // Ver uitgestrekt (echte duik) kan de keeper nooit klemvast pakken — dan
+      // bokst/tikt hij de bal weg. Zo valt een bal niet "dood" ver van de keeper
+      // vandaan stil, maar ketst hij weg (leest als een duikredding).
+      const canHold = stretch < 0.9;
+      const heldCleanly = easy || (canHold && this.ball.z < 2.4 && this.rng.chance(catchProb));
 
       if (heldCleanly) {
         // Klemvast.
@@ -1487,6 +1594,10 @@ export class MatchSim {
         side: p.side,
         shirtNumber: p.shirtNumber,
         position: p.position,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        hairColor: p.hairColor,
+        skinColor: p.skinColor,
         x: p.pos.x,
         y: p.pos.y,
         facing: p.facing,

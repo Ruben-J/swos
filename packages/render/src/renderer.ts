@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
+import { Application, Container, Graphics } from "pixi.js";
 import { PITCH, lerp } from "@pitch/shared";
 import type { CameraView, MatchSnapshot, MatchSnapshotPlayer } from "@pitch/engine";
 
@@ -14,7 +14,6 @@ interface PlayerNode {
   body: Graphics;
   ring: Graphics;
   shadow: Graphics;
-  label: Text;
 }
 
 /**
@@ -31,7 +30,6 @@ export class MatchRenderer {
   private ball = new Graphics(); // voetbal-grafiek (eenmalig getekend, roteert)
   private players = new Map<string, PlayerNode>();
   private colors: Record<"home" | "away", TeamColors>;
-  private labelStyle: TextStyle;
 
   private prev: MatchSnapshot | null = null;
   // Rol-animatie van de bal: afgelegde afstand + laatste looprichting.
@@ -42,12 +40,6 @@ export class MatchRenderer {
   constructor(app: Application, colors: Record<"home" | "away", TeamColors>) {
     this.app = app;
     this.colors = colors;
-    this.labelStyle = new TextStyle({
-      fill: "#ffffff",
-      fontSize: 9,
-      fontFamily: "monospace",
-      fontWeight: "700",
-    });
 
     this.app.stage.addChild(this.world);
     this.world.addChild(this.pitchLayer);
@@ -65,7 +57,7 @@ export class MatchRenderer {
    */
   private drawRollingBall(dirX: number, dirY: number, rolled: number): void {
     const g = this.ball;
-    const R = 4.2;
+    const R = 2.8;
     g.clear();
     g.circle(0, 0, R).fill(0xf4f4f4).stroke({ width: 0.9, color: 0x222222, alpha: 0.6 });
     // Loodrecht op de looprichting (de "as" waarom de bal rolt).
@@ -184,48 +176,91 @@ export class MatchRenderer {
     this.drawGoalNet(g, W, 1);
   }
 
-  /** Teken een doel als een net (maaswerk + frame) achter de doellijn. */
+  /**
+   * Teken een doel top-down: een rechthoekig, fijnmazig net achter de lijn.
+   * Alleen op de doellijn een dikke witte lijn (de lat); naar achteren is alles
+   * dun net (geen kader eromheen).
+   */
   private drawGoalNet(g: Graphics, xLine: number, dir: number): void {
     const u = PX_PER_UNIT;
-    const depth = PITCH.goalDepth;
     const gw = PITCH.goalWidth;
-    const gy0 = (PITCH.height - gw) / 2;
-    const gy1 = gy0 + gw;
-    const xBack = xLine + dir * depth;
-    const left = Math.min(xLine, xBack);
-    const right = Math.max(xLine, xBack);
+    const cy = PITCH.height / 2;
+    const depth = 2.8; // diepte van het net achter de lijn
+    const dip = 0.6; // hoe ver de achterkant in het midden naar binnen holt
+    const fan = 0.55; // lichte verbreding naar achteren
 
-    // Netvlak (licht gevuld) + maaswerk.
-    g.rect(left * u, gy0 * u, (right - left) * u, gw * u).fill({ color: 0xffffff, alpha: 0.08 });
-    const mesh = { width: 1, color: 0xffffff, alpha: 0.32 } as const;
-    const step = 0.9;
-    for (let x = left; x <= right + 1e-3; x += step) {
-      g.moveTo(x * u, gy0 * u).lineTo(x * u, gy1 * u).stroke(mesh);
+    // Parametrisch net: s = breedte (0..1), t = diepte (0..1). De doellijn (t=0)
+    // is recht; naar achteren holt het net in het midden naar binnen (hangt door
+    // naar het doel) i.p.v. kaarsrecht of bol te staan.
+    const P = (s: number, t: number): [number, number] => {
+      const half = gw / 2 + fan * t;
+      const back = depth * t - dip * Math.sin(Math.PI * s) * t * t;
+      return [(xLine + dir * back) * u, (cy + (s - 0.5) * 2 * half) * u];
+    };
+
+    // Heel licht gevuld vlak (gras schemert door het net).
+    const outline: number[] = [];
+    const NS = 14;
+    for (let i = 0; i <= NS; i++) outline.push(...P(i / NS, 0));
+    for (let i = 1; i <= NS; i++) outline.push(...P(1, i / NS));
+    for (let i = NS - 1; i >= 0; i--) outline.push(...P(i / NS, 1));
+    for (let i = NS - 1; i >= 1; i--) outline.push(...P(0, i / NS));
+    g.poly(outline).fill({ color: 0xffffff, alpha: 0.05 });
+
+    // Fijn maaswerk dat de welving volgt (even dichte mazen beide richtingen).
+    const mesh = { width: 0.7, color: 0xffffff, alpha: 0.32 } as const;
+    const cell = 0.42;
+    const wL = Math.round(gw / cell); // strengen langs de breedte (front->back)
+    for (let i = 0; i <= wL; i++) {
+      const s = i / wL;
+      g.moveTo(...P(s, 0));
+      for (let tj = 1; tj <= 8; tj++) g.lineTo(...P(s, tj / 8));
+      g.stroke(mesh);
     }
-    for (let y = gy0; y <= gy1 + 1e-3; y += step) {
-      g.moveTo(left * u, y * u).lineTo(right * u, y * u).stroke(mesh);
+    const dL = Math.max(3, Math.round(depth / cell)); // strengen langs de diepte
+    for (let j = 0; j <= dL; j++) {
+      const t = j / dL;
+      g.moveTo(...P(0, t));
+      for (let sj = 1; sj <= NS; sj++) g.lineTo(...P(sj / NS, t));
+      g.stroke(mesh);
     }
-    // Frame (palen + lat + achterkant).
-    g.rect(left * u, gy0 * u, (right - left) * u, gw * u).stroke({ width: 2.5, color: 0xffffff });
+
+    // Dikke witte lat alleen op de doellijn.
+    g.moveTo(...P(0, 0)).lineTo(...P(1, 0)).stroke({ width: 2.8, color: 0xffffff });
   }
 
   private ensurePlayer(p: MatchSnapshotPlayer): PlayerNode {
     let node = this.players.get(p.id);
     if (node) return node;
     const container = new Container();
-    const shadow = new Graphics().ellipse(0, 0, 7, 4).fill({ color: 0x000000, alpha: 0.25 });
+    const shadow = new Graphics().ellipse(0, 0, 5.2, 3).fill({ color: 0x000000, alpha: 0.25 });
     const body = new Graphics();
     const ring = new Graphics();
     const col = this.colors[p.side];
-    const fill = p.isKeeper ? 0xffd23f : hexToNum(col.primary);
-    body.circle(0, 0, p.isKeeper ? 6 : 6.5).fill(fill).stroke({ width: 1.5, color: 0x101010 });
-    const label = new Text({ text: String(p.shirtNumber), style: this.labelStyle });
-    label.anchor.set(0.5);
-    container.addChild(shadow, ring, body, label);
+    const shirt = p.isKeeper ? 0x2bd06a : hexToNum(col.primary);
+    this.drawPlayerSprite(body, shirt, hexToNum(p.hairColor), hexToNum(p.skinColor));
+    container.addChild(shadow, ring, body);
     this.world.addChild(container);
-    node = { container, body, ring, shadow, label };
+    node = { container, body, ring, shadow };
     this.players.set(p.id, node);
     return node;
+  }
+
+  /**
+   * Teken een top-down spelersprite, lokaal kijkend naar +x. Shirt-romp met
+   * schouders, daarboven een hoofd (haarkleur) met een gezicht (huidtint) dat
+   * naar voren wijst, zodat je de kijkrichting ziet.
+   */
+  private drawPlayerSprite(g: Graphics, shirt: number, hair: number, skin: number): void {
+    g.clear();
+    // Schaduwzijde van het shirt (donkerder achterkant) als simpele diepte.
+    // Romp/schouders (breder dwars op de kijkrichting).
+    g.ellipse(-0.3, 0, 4.1, 4.8).fill(shirt).stroke({ width: 1.2, color: 0x101010, alpha: 0.8 });
+    // Korte broek-hint achteraan.
+    g.ellipse(-2.3, 0, 1.9, 3.5).fill({ color: 0x20242b, alpha: 0.55 });
+    // Hoofd: haar (kruin) met gezicht (huid) naar voren.
+    g.circle(1.0, 0, 2.6).fill(hair).stroke({ width: 0.9, color: 0x101010, alpha: 0.7 });
+    g.circle(2.0, 0, 1.7).fill(skin);
   }
 
   /** Render één frame met interpolatie tussen vorige en huidige snapshot. */
@@ -261,13 +296,15 @@ export class MatchRenderer {
       const x = (pp ? lerp(pp.x, p.x, alpha) : p.x) * u;
       const y = (pp ? lerp(pp.y, p.y, alpha) : p.y) * u;
       node.container.position.set(x, y);
-      // Rugnummers rechtop houden ondanks de wereld-rotatie.
-      node.label.rotation = -rot;
+      // Sprite draait mee met de kijkrichting (facing is een wereldhoek; de
+      // wereld-rotatie wordt door de parent toegevoegd).
+      const pf = pp ? lerpAngle(pp.facing, p.facing, alpha) : p.facing;
+      node.body.rotation = pf;
 
       // Actieve-speler-ring.
       node.ring.clear();
       if (p.isActive) {
-        node.ring.circle(0, 0, 9).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+        node.ring.circle(0, 0, 7).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
       }
     }
 
@@ -353,4 +390,11 @@ export class MatchRenderer {
 
 function hexToNum(hex: string): number {
   return parseInt(hex.replace("#", ""), 16);
+}
+
+/** Interpoleer een hoek via de kortste weg (geen 360°-flip bij de wrap). */
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
 }

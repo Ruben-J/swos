@@ -33,6 +33,10 @@ export interface PlayerEntity {
   side: Side;
   shirtNumber: number;
   position: Position;
+  firstName: string;
+  lastName: string;
+  hairColor: string;
+  skinColor: string;
   isKeeper: boolean;
   stats: MatchPlayerStats;
   /** Vaste ankerpositie in de formatie (pitch units). */
@@ -50,6 +54,8 @@ export interface PlayerEntity {
   stamina: number;
   /** Leeggelopen: kan pas weer sprinten na voldoende herstel (hysterese). */
   exhausted: boolean;
+  /** Eindpunt van een keeperduik: hij stopt hier i.p.v. door te schieten. */
+  diveTarget?: Vec2 | null;
 }
 
 /** De bal als spel-specifiek kinematisch object. */
@@ -140,5 +146,10 @@ export interface MatchPlayerSetup {
   id: string;
   shirtNumber: number;
   position: Position;
+  firstName: string;
+  lastName: string;
+  /** Uiterlijk (CSS-kleur). Shirtkleur komt van het team. */
+  hairColor: string;
+  skinColor: string;
   stats: MatchPlayerStats;
 }

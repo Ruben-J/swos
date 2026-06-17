@@ -61,11 +61,23 @@ export function applyAftertouch(ball: BallState, input: Vec2): void {
   const speed = len(ball.vel);
   if (speed < 0.01) return;
   const fwd = { x: ball.vel.x / speed, y: ball.vel.y / speed };
-  // Alleen de ZIJWAARTSE (loodrechte) component buigt de bal (curve). Voor- en
-  // achterwaarts sturen doet niks — je kunt een getrapte bal niet versnellen,
-  // afremmen of optillen.
+  // Het effect is het sterkst NET na de trap en zakt over het venster weg:
+  // vroeg sturen buigt de bal veel, laat sturen nauwelijks. Kwadratische
+  // afname legt het gewicht extra op de eerste momenten na het schot.
+  const phase = clamp(1 - ball.sinceKick / BALL.aftertouchWindow, 0, 1);
+  const earlyWeight = phase * phase;
+  // Zijwaartse (loodrechte) component buigt de bal (curve) — onafhankelijk van loft.
   const side = input.x * -fwd.y + input.y * fwd.x;
-  ball.curve += side * BALL.aftertouchCurve * 0.016;
+  ball.curve += side * BALL.aftertouchCurve * 0.016 * (0.35 + 1.3 * earlyWeight);
+
+  // Tegengesteld sturen (tégen de balrichting in) tilt de bal de lucht in (lob).
+  // Onafhankelijk van de curve: ook diagonaal (terug + zijwaarts) blijft de bal
+  // vol omhoog gaan — een duidelijke terug-component telt al als volle loft.
+  const back = -(input.x * fwd.x + input.y * fwd.y);
+  if (back > 0) {
+    const loft = Math.min(1, back * 1.5);
+    ball.vz += loft * BALL.aftertouchLoft * 0.016;
+  }
 }
 
 /** Integreer de balfysica één sim-stap (dt seconden). */
