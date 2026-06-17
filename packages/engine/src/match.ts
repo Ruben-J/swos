@@ -201,12 +201,12 @@ export class MatchSim {
    * De hervatting wordt ingenomen: de nemer trapt/gooit de bal naar een
    * teamgenoot (of in de aangegeven richting). Pas dan is de bal in het spel.
    */
-  private takeRestart(dir: Vec2, power: number, loft: number): void {
+  private takeRestart(dir: Vec2, power: number, loft: number, targetId: string | null = null): void {
     const taker = this.byId(this.restartTakerId);
     this.phase = "play";
     if (taker) {
       this.ball.pos = { x: taker.pos.x, y: taker.pos.y };
-      kickBall(this.ball, { dir, power, loft, curve: 0, byId: taker.id, bySide: taker.side });
+      kickBall(this.ball, { dir, power, loft, curve: 0, byId: taker.id, bySide: taker.side, targetId });
       taker.state = "kick";
     }
     this.restartTakerId = null;
@@ -409,6 +409,8 @@ export class MatchSim {
     if (best) {
       this.ball.lastTouchSide = best.side;
       this.ball.lastTouchId = best.id;
+      // Bal aangekomen/onderschept: bedoelde-ontvanger-aanduiding vervalt.
+      this.ball.targetId = null;
       // Keeper die de bal controleert -> klemvast (beschermd balbezit).
       if (best.isKeeper) this.ballProtectedFor = best.side;
     }
@@ -441,9 +443,10 @@ export class MatchSim {
           );
           const dir = mate ? dirTo(p, mate.pos) : aimDir;
           const d = mate ? dist(p.pos, mate.pos) : longBall ? 36 : 14;
+          const tId = mate?.id ?? null;
           cmd.kick = longBall
-            ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.5 ? 4 : 0), curve: 0 }
-            : { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0 };
+            ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.5 ? 4 : 0), curve: 0, targetId: tId }
+            : { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0, targetId: tId };
         } else if (shoot) {
           // Schot ALTIJD in de kijkrichting (facing): die is vloeiend (uit de
           // gesmoothde snelheid), dus je kunt ook tussen de 8 toetsrichtingen in
@@ -462,7 +465,7 @@ export class MatchSim {
           const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir));
           const dir = mate ? dirTo(p, mate.pos) : aimDir;
           const d = mate ? dist(p.pos, mate.pos) : 14;
-          cmd.kick = { dir, power: 13 + Math.min(14, d * 0.5), loft: 0, curve: 0 };
+          cmd.kick = { dir, power: 13 + Math.min(14, d * 0.5), loft: 0, curve: 0, targetId: mate?.id ?? null };
         }
       } else if (dist(p.pos, this.ball.pos) < 1.3 && this.ball.z < 1.5) {
         // Losse bal aan de voet: one-touch (X = pass, Z = clear).
@@ -511,6 +514,7 @@ export class MatchSim {
         curve: cmd.kick.curve,
         byId: p.id,
         bySide: p.side,
+        targetId: cmd.kick.targetId ?? null,
       });
       p.state = "kick";
       p.stateTimer = 0.2;
@@ -674,15 +678,34 @@ export class MatchSim {
     if (taking === this.humanSide) {
       // Match staat stil tot de mens zelf inneemt.
       if (humanIntent.actionReleased) {
+        const aim = this.aimDirection(taker, humanIntent);
         if (this.restartIsPenalty) {
           // Strafschop: schiet in de kijkrichting (mik op de hoek).
-          const aim = this.aimDirection(taker, humanIntent);
           this.takeRestart(aim, 34, 1);
         } else {
-          const aim = this.aimDirection(taker, humanIntent);
-          // Z (schieten) = harde inname, X (passen) = ingespeelde bal.
-          const power = humanIntent.actionKind === "shoot" ? 24 : 15;
-          this.takeRestart(aim, power, this.restartIsKickoff ? 0 : 2);
+          const charge = clamp(humanIntent.actionHeld / 0.5, 0, 1);
+          const shoot = humanIntent.actionKind === "shoot";
+          if (shoot && !this.restartIsKickoff) {
+            // Z = geladen, hoge/harde bal (uittrap/lange bal). Langer inhouden =
+            // harder én hoger weggeschoten.
+            this.takeRestart(aim, 20 + charge * 16, 3 + charge * 9);
+          } else {
+            // X = gerichte, harde pass op maat naar een teamgenoot in de
+            // kijkrichting (ook bij doeltrap/inworp); de ontvanger komt 'm tegemoet.
+            const mate = nearestTeammateInCone(
+              this.players,
+              taker,
+              aimAngle(aim),
+              Math.PI * 0.6,
+              this.restartIsKickoff ? 40 : 64,
+            );
+            const dir = mate ? dirTo(taker, mate.pos) : aim;
+            const d = mate ? dist(taker.pos, mate.pos) : 18;
+            const power = this.restartIsKickoff
+              ? clamp(11 + d * 0.4, 12, 22)
+              : clamp(14 + d * 0.5, 16, 34);
+            this.takeRestart(dir, power, 0, mate?.id ?? null);
+          }
         }
       }
       return;
@@ -702,7 +725,7 @@ export class MatchSim {
       nearestTeammateInCone(this.players, taker, taker.facing, Math.PI, 40);
     if (mate) {
       const d = dist(taker.pos, mate.pos);
-      this.takeRestart(dirTo(taker, mate.pos), 13 + Math.min(14, d * 0.5), 0);
+      this.takeRestart(dirTo(taker, mate.pos), 13 + Math.min(14, d * 0.5), 0, mate.id);
     } else {
       this.takeRestart(dirTo(taker, goal), 20, 3);
     }

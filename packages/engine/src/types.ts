@@ -69,6 +69,8 @@ export interface BallState {
   /** Wie raakte de bal het laatst (voor uit/corner/goal-toekenning). */
   lastTouchSide: Side | null;
   lastTouchId: string | null;
+  /** Bedoelde ontvanger van een pass — die speler komt de bal tegemoet. */
+  targetId: string | null;
 }
 
 export type MatchPhase =

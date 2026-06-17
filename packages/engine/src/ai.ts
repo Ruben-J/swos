@@ -9,6 +9,8 @@ export interface KickRequest {
   power: number;
   loft: number;
   curve: number;
+  /** Bedoelde ontvanger (komt de bal tegemoet), of null. */
+  targetId?: string | null;
 }
 
 export interface PlayerCommand {
@@ -163,8 +165,11 @@ export interface TeamAiPlan {
   targets: Map<string, Vec2>;
 }
 
-/** Minimale afstand van de eigen doellijn voor veldspelers (linie niet achter keeper). */
-const DEF_LINE_MIN = 9;
+/** Verdedigende linie volgt de BAL (niet een losse diepe spits): schuift op als
+ *  de bal hoger ligt, zakt mee als de bal dichtbij komt. Harde ondergrens zodat
+ *  de linie nooit op/achter de keeper komt; cap rond de middenlijn. */
+const DEF_LINE_HARD_MIN = 6;
+const DEF_LINE_PUSH_MAX = 46;
 /** Mark alleen tegenstanders rond de bal (de actieve zone van het veld). */
 const MARK_BALL_RADIUS = 38;
 /** Verdediger pakt alleen op als de man redelijk dichtbij is, anders houdt hij vorm. */
@@ -214,14 +219,16 @@ export function computeTeamPlan(
   // bal, dus de toegestane lijn = verst van die drie (middenlijn / bal / linie).
   clampOffside(targets, players, side, ball.pos);
 
-  // Verdedigende lijn niet te diep: veldspelers blijven vóór de keeper (een
-  // vaste minimumafstand van de eigen doellijn), zodat de linie niet op of
-  // achter de keeper komt te staan bij laag verdedigen.
+  // Verdedigende lijn schuift op met de BAL, niet met een losse diepe spits:
+  // ligt de bal op het middenveld, dan staat de linie ook hoger (en zet zo de
+  // hoog blijvende aanvallers buitenspel) i.p.v. terug te zakken op de keeper.
+  const ballDist = side === "home" ? ball.pos.x : PITCH.width - ball.pos.x;
+  const lineFloor = clamp(ballDist * 0.55, DEF_LINE_HARD_MIN, DEF_LINE_PUSH_MAX);
   for (const p of players) {
     if (p.side !== side || p.isKeeper) continue;
     const t = targets.get(p.id);
     if (!t) continue;
-    const x = side === "home" ? Math.max(t.x, DEF_LINE_MIN) : Math.min(t.x, PITCH.width - DEF_LINE_MIN);
+    const x = side === "home" ? Math.max(t.x, lineFloor) : Math.min(t.x, PITCH.width - lineFloor);
     if (x !== t.x) targets.set(p.id, { x, y: t.y });
   }
 
@@ -353,6 +360,14 @@ export function computeAiCommand(
     return onBallCommand(players, opponents, ball, player, myGoal);
   }
 
+  // Bedoelde ontvanger van een pass: kom de bal actief tegemoet (interceptiepunt).
+  if (ball.targetId === player.id && controlling === null && ball.lastTouchSide === player.side) {
+    const speed = playerMaxSpeed(player.stats, true);
+    const aim = len(ball.vel) > 4 ? predictIntercept(ball, player.pos, speed) : { ...ball.pos };
+    moveTo(cmd, player, aim, true);
+    return cmd;
+  }
+
   if (teamHasBall) {
     // Support: beweeg naar positionele target (al opgeschoven door de tactische laag).
     moveTo(cmd, player, target, dist(player.pos, ball.pos) > 24);
@@ -455,6 +470,7 @@ function onBallCommand(
       power: 14 + Math.min(16, d * 0.55),
       loft: laneBlocked(player.pos, mate.pos, opponents, 1.4) ? 4 : 0,
       curve: 0,
+      targetId: mate.id,
     };
     return cmd;
   }

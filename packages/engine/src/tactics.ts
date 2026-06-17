@@ -121,7 +121,10 @@ export function tacticalTarget(
   // Territoriaal meeschuiven met de bal (compactheid), sterker in balbezit.
   const compact = phase >= 0.5 ? 0.34 + tactics.lineHeight * 0.16 : 0.18 + tactics.lineHeight * 0.1;
   const ballShiftX = (ball.x - PITCH.width / 2) * compact;
-  const ballShiftY = (ball.y - PITCH.height / 2) * (0.14 + (1 - tactics.width) * 0.12);
+  // De hele formatie schuift duidelijk mee in de breedte richting de bal: ligt
+  // de bal onderin, dan zakt het blok mee naar onder en schuiven de links
+  // (boven) gepositioneerde spelers een stuk naar de bal toe.
+  const ballShiftY = (ball.y - PITCH.height / 2) * (0.32 + (1 - tactics.width) * 0.18);
 
   const x = clamp(anchor.x + advance + ballShiftX, 2, PITCH.width - 2);
   const y = clamp(anchor.y + ballShiftY, 2, PITCH.height - 2);

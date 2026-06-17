@@ -12,6 +12,7 @@ export function createBall(pos: Vec2): BallState {
     sinceKick: 999,
     lastTouchSide: null,
     lastTouchId: null,
+    targetId: null,
   };
 }
 
@@ -26,6 +27,8 @@ export interface KickParams {
   curve?: number;
   byId: string;
   bySide: Side;
+  /** Bedoelde ontvanger (komt de bal tegemoet), of null. */
+  targetId?: string | null;
 }
 
 /** Geef de bal een trap: zet snelheid, hoogte en reset het aftertouch-venster. */
@@ -41,6 +44,7 @@ export function kickBall(ball: BallState, p: KickParams): void {
   ball.ownerId = null;
   ball.lastTouchSide = p.bySide;
   ball.lastTouchId = p.byId;
+  ball.targetId = p.targetId ?? null;
 }
 
 /**
