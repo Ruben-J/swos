@@ -321,6 +321,22 @@ export class MatchSim {
         this.keeperHoldTime < KEEPER_DISTRIBUTE_DELAY;
       if (aiKeeperHolding) cmd.kick = null;
 
+      // AI maakt af en toe een overtreding: een verdediger die dicht op de
+      // baldragende tegenstander zit (lichaam binnen bereik) terwijl de bal net
+      // buiten schoon bereik is, kan een mistimede sliding inzetten -> de man
+      // i.p.v. de bal raken. Kans is klein en hoger bij een zwakke tackler.
+      if (!isHumanActive && !p.isKeeper && p.tackleCooldown <= 0 && !cmd.tackle) {
+        const owner = this.byId(this.ball.ownerId);
+        if (owner && owner.side !== p.side) {
+          const dMan = dist(p.pos, owner.pos);
+          const dBall = dist(p.pos, this.ball.pos);
+          if (dMan < PLAYER.tackleRange + 0.3 && dBall > PLAYER.tackleRange) {
+            const foulProb = 0.006 * (1.5 - p.stats.tackling / 100);
+            if (this.rng.chance(foulProb)) cmd.tackle = true;
+          }
+        }
+      }
+
       this.applyCommand(p, cmd, dt);
     }
 
@@ -506,6 +522,15 @@ export class MatchSim {
   }
 
   private applyCommand(p: PlayerEntity, cmd: PlayerCommand, dt: number): void {
+    // Een duikende keeper ligt nog: hij komt pas overeind als de dive-timer
+    // afloopt (hij beweegt niet direct door na een redding/parry). Wel de bal
+    // blijven dragen als hij 'm vasthad.
+    if (p.isKeeper && p.state === "dive" && p.stateTimer > 0 && this.ball.ownerId !== p.id) {
+      cmd.move = { x: 0, y: 0 };
+      cmd.sprint = false;
+      cmd.tackle = false;
+    }
+
     // Beweging.
     moveTowards(p, cmd.move, cmd.sprint, dt);
 
@@ -650,9 +675,14 @@ export class MatchSim {
     this.ball.z = 0;
     if (taking) this.ballProtectedFor = taking;
 
-    // Mens stelt het richt-pijltje bij met links/rechts (ook tijdens de pauze).
-    if (taking === this.humanSide && this.restartAim !== null) {
-      this.restartAim += humanIntent.move.x * AIM_ROTATE_RATE * dt;
+    // Mens stelt het richt-pijltje bij door opzij te sturen t.o.v. de pijl
+    // (push loodrecht op de pijl = pijl draait die kant op). Werkt in
+    // wereld-ruimte, dus rotatie-onafhankelijk (klopt ook met het gedraaide veld).
+    if (taking === this.humanSide && this.restartAim !== null && len(humanIntent.move) > 0.1) {
+      const ax = Math.cos(this.restartAim);
+      const ay = Math.sin(this.restartAim);
+      const steer = -humanIntent.move.x * ay + humanIntent.move.y * ax; // component ⊥ op de pijl
+      this.restartAim += steer * AIM_ROTATE_RATE * dt;
       if (taker) taker.facing = this.restartAim;
     }
 
@@ -884,7 +914,7 @@ export class MatchSim {
       const diving = stretch > 0.4 || speed > 20;
       if (diving) {
         p.state = "dive";
-        p.stateTimer = 0.5;
+        p.stateTimer = 0.6;
       }
 
       // Een hard, goed geplaatst schot kan de keeper helemaal kloppen (de bal
@@ -894,7 +924,7 @@ export class MatchSim {
       if (towardGoal && this.rng.chance(beatChance)) {
         if (diving) {
           p.state = "dive";
-          p.stateTimer = 0.5;
+          p.stateTimer = 0.6;
         }
         return; // keeper geklopt, bal loopt door
       }
@@ -944,7 +974,7 @@ export class MatchSim {
     this.ball.lastTouchSide = gk.side;
     this.ball.lastTouchId = gk.id;
     gk.state = "dive";
-    gk.stateTimer = 0.5;
+    gk.stateTimer = 0.6;
   }
 
   /** Doelpuntdetectie. Returnt true als er gescoord is. */

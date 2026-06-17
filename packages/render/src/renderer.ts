@@ -28,12 +28,16 @@ export class MatchRenderer {
   private pitchLayer = new Graphics();
   private ballShadow = new Graphics();
   private aimArrow = new Graphics();
-  private ball = new Graphics();
+  private ball = new Graphics(); // voetbal-grafiek (eenmalig getekend, roteert)
   private players = new Map<string, PlayerNode>();
   private colors: Record<"home" | "away", TeamColors>;
   private labelStyle: TextStyle;
 
   private prev: MatchSnapshot | null = null;
+  // Rol-animatie van de bal: afgelegde afstand + laatste looprichting.
+  private ballRoll = 0;
+  private lastBallScreen: { x: number; y: number } | null = null;
+  private lastBallDir = { x: 1, y: 0 };
 
   constructor(app: Application, colors: Record<"home" | "away", TeamColors>) {
     this.app = app;
@@ -51,6 +55,50 @@ export class MatchRenderer {
     this.world.addChild(this.aimArrow);
     this.world.addChild(this.ball);
     this.drawPitch();
+    this.drawRollingBall(1, 0, 0);
+  }
+
+  /**
+   * Teken de voetbal die in de looprichting ROLT: zwarte panelen lopen als op
+   * een bol (orthografische projectie) over de bal mee — ze komen klein aan de
+   * achterkant op, groeien over de top en verdwijnen vooraan in de looprichting.
+   */
+  private drawRollingBall(dirX: number, dirY: number, rolled: number): void {
+    const g = this.ball;
+    const R = 4.2;
+    g.clear();
+    g.circle(0, 0, R).fill(0xf4f4f4).stroke({ width: 0.9, color: 0x222222, alpha: 0.6 });
+    // Loodrecht op de looprichting (de "as" waarom de bal rolt).
+    const perpX = -dirY;
+    const perpY = dirX;
+    const black = 0x1a1a1a;
+    // Panelen verdeeld over de bol in ringen ({ l = positie langs de rol-as,
+    // o = fase-offset, s = relatieve grootte }). Meer panelen = vollere voetbal.
+    const panels: { l: number; o: number; s: number }[] = [];
+    // Twee middenringen (groot) + twee buitenringen (kleiner), elk verspringend.
+    const rings = [
+      { l: 0.0, n: 4, s: 1.0, phase: 0 },
+      { l: 0.45, n: 3, s: 0.85, phase: 0.7 },
+      { l: -0.45, n: 3, s: 0.85, phase: 0.7 },
+      { l: 0.76, n: 2, s: 0.6, phase: 1.4 },
+      { l: -0.76, n: 2, s: 0.6, phase: 1.4 },
+    ];
+    for (const ring of rings) {
+      for (let k = 0; k < ring.n; k++) {
+        panels.push({ l: ring.l, o: ring.phase + (k / ring.n) * Math.PI * 2, s: ring.s });
+      }
+    }
+    for (const pan of panels) {
+      const th = rolled / R + pan.o;
+      const c = Math.cos(th); // >0 = voorkant (zichtbaar), <0 = achterkant
+      if (c < -0.1) continue;
+      const latR = R * pan.l;
+      const along = Math.sin(th) * Math.sqrt(Math.max(0, R * R - latR * latR));
+      const cx = dirX * along + perpX * latR;
+      const cy = dirY * along + perpY * latR;
+      const size = R * 0.26 * pan.s * (0.45 + 0.55 * Math.max(0, c));
+      g.circle(cx, cy, size).fill({ color: black, alpha: 0.5 + 0.5 * Math.max(0, c) });
+    }
   }
 
   static async create(
@@ -236,13 +284,33 @@ export class MatchRenderer {
     const bx = (pball ? lerp(pball.x, snap.ball.x, alpha) : snap.ball.x) * u;
     const by = (pball ? lerp(pball.y, snap.ball.y, alpha) : snap.ball.y) * u;
     const bz = (pball ? lerp(pball.z, snap.ball.z, alpha) : snap.ball.z) * u;
+    // Schaduw groeit/zachter bij hoogte.
+    const shScale = 1 + bz * 0.04;
     this.ballShadow.clear();
-    this.ballShadow.ellipse(bx, by, 4, 2.5).fill({ color: 0x000000, alpha: 0.3 });
-    this.ball.clear();
-    // Hoogte (loft) altijd naar scherm-boven, ongeacht de wereld-rotatie.
+    this.ballShadow
+      .ellipse(bx, by, 4 * shScale, 2.5 * shScale)
+      .fill({ color: 0x000000, alpha: 0.3 / shScale });
+
+    // Voetbal: positioneer (hoogte/loft naar scherm-boven) en laat 'm rollen.
     const liftX = -bz * sin;
     const liftY = -bz * cos;
-    this.ball.circle(bx + liftX, by + liftY, 3.4).fill(0xffffff).stroke({ width: 1, color: 0x111111 });
+    const px = bx + liftX;
+    const py = by + liftY;
+    if (this.lastBallScreen) {
+      const dx = px - this.lastBallScreen.x;
+      const dy = py - this.lastBallScreen.y;
+      const moved = Math.hypot(dx, dy);
+      if (moved > 0.05) {
+        this.lastBallDir = { x: dx / moved, y: dy / moved };
+        // Rol over de bol mee met de afstand (gestileerd, niet fysisch-snel).
+        this.ballRoll += Math.min(moved * 0.5, 2.5);
+      }
+    }
+    this.lastBallScreen = { x: px, y: py };
+    this.drawRollingBall(this.lastBallDir.x, this.lastBallDir.y, this.ballRoll);
+    this.ball.position.set(px, py);
+    this.ball.rotation = 0;
+    this.ball.scale.set(1 + bz * 0.012);
 
     // Richt-pijltje voor een mikbare hervatting (hoek/vrije trap/penalty).
     this.aimArrow.clear();

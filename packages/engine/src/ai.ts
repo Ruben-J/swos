@@ -377,11 +377,30 @@ export function computeAiCommand(
   // Verdedigen / losse bal.
   if (player.id === plan.presserId || (ballLoose && isClosestOutfield(players, player, ball.pos))) {
     const speed = playerMaxSpeed(player.stats, true);
-    const aim =
-      len(ball.vel) > 4 ? predictIntercept(ball, player.pos, speed) : { ...ball.pos };
+    const owner = ball.ownerId;
+    let aim: Vec2;
+    if (owner && owner !== player.id && !ballLoose) {
+      // De tegenstander heeft de bal: niet in de rug lopen. Sta je goal-ver
+      // (achter hem), kom dan via een hoek om hem heen naar de doel-zijde i.p.v.
+      // recht op zijn rug; sta je al goal-zijde, dan knijp je 'm af bij de bal.
+      const toGoal = normalize({ x: ownGoal.x - ball.pos.x, y: ownGoal.y - ball.pos.y });
+      const rel = { x: player.pos.x - ball.pos.x, y: player.pos.y - ball.pos.y };
+      const behind = rel.x * toGoal.x + rel.y * toGoal.y < 0;
+      if (behind) {
+        const perp = { x: -toGoal.y, y: toGoal.x };
+        const side = rel.x * perp.x + rel.y * perp.y >= 0 ? 1 : -1;
+        aim = {
+          x: ball.pos.x + toGoal.x * 3 + perp.x * side * 3.2,
+          y: ball.pos.y + toGoal.y * 3 + perp.y * side * 3.2,
+        };
+      } else {
+        aim = { ...ball.pos };
+      }
+    } else {
+      aim = len(ball.vel) > 4 ? predictIntercept(ball, player.pos, speed) : { ...ball.pos };
+    }
     moveTo(cmd, player, aim, true);
     // Alleen tackelen als de bal echt binnen bereik is (anders overtreding).
-    const owner = ball.ownerId;
     if (dist(player.pos, ball.pos) < 1.45 && owner && owner !== player.id) cmd.tackle = true;
     return cmd;
   }
