@@ -155,7 +155,8 @@ function appearance(idHash: string): { hair: string; skin: string } {
   for (let i = 0; i < idHash.length; i++) h = (h * 31 + idHash.charCodeAt(i)) >>> 0;
   return {
     hair: HAIR_COLORS[h % HAIR_COLORS.length]!,
-    skin: SKIN_TONES[(h >> 3) % SKIN_TONES.length]!,
+    // Unsigned shift: een signed >> kan negatief worden -> negatieve index -> undefined.
+    skin: SKIN_TONES[(h >>> 3) % SKIN_TONES.length]!,
   };
 }
 
