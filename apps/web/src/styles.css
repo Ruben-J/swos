@@ -302,3 +302,250 @@ kbd {
   border: 1px solid #36424d;
   font-family: monospace;
 }
+
+/* --- Career setup --- */
+.career-setup,
+.career-hub {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem);
+  gap: 1rem;
+  overflow: hidden;
+}
+.cs-head,
+.ch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cs-head h1 {
+  font-size: 1.6rem;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.cs-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 2fr;
+  gap: 1rem;
+  min-height: 0;
+}
+.cs-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+}
+.cs-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+.cs-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid #26323d;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.cs-item:hover {
+  border-color: var(--accent);
+}
+.cs-item.sel {
+  border-color: var(--accent);
+  background: #16241c;
+}
+.cs-tier {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+.cs-clubs .cs-item {
+  justify-content: flex-start;
+}
+.cs-chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+.cs-club-name {
+  flex: 1;
+}
+.cs-rating {
+  font-weight: 700;
+  color: var(--accent-2);
+}
+.cs-foot {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+.cs-input {
+  flex: 1;
+  max-width: 320px;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #26323d;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+/* --- Career hub --- */
+.ch-club {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.ch-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.ch-club-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.ch-sub {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.ch-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.ch-date {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.ch-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 1rem;
+  min-height: 0;
+}
+.ch-panel {
+  background: var(--panel);
+  border: 1px solid #1d2730;
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
+  overflow-y: auto;
+}
+.ch-panel h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.7rem;
+}
+.ch-fixture {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.15rem;
+}
+.ch-vs {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.ch-strong {
+  font-weight: 700;
+  color: var(--accent);
+}
+.ch-fixture-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.3rem 0 0.9rem;
+}
+.ch-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+.ch-done {
+  padding: 0.8rem 0;
+  color: var(--muted);
+}
+.ch-recent-title {
+  margin-top: 1.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.ch-recent {
+  list-style: none;
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.ch-res {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+.ch-res-tag {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.75rem;
+  background: #2a3742;
+  color: #fff;
+}
+.ch-res-W .ch-res-tag { background: #1f7a45; }
+.ch-res-V .ch-res-tag { background: #8a2b2b; }
+.ch-res-G .ch-res-tag { background: #5a5326; }
+.ch-res-score {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ch-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.ch-table th,
+.ch-table td {
+  padding: 0.3rem 0.45rem;
+  text-align: center;
+}
+.ch-table th {
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid #26323d;
+}
+.ch-table .ch-tn {
+  text-align: left;
+}
+.ch-table .ch-pts {
+  font-weight: 700;
+}
+.ch-table tr.ch-me td {
+  background: #16241c;
+}
+.ch-table tr.ch-promo td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.ch-table tr.ch-releg td:first-child {
+  box-shadow: inset 3px 0 0 #c0392b;
+}

@@ -6,6 +6,8 @@ import { MatchController } from "../match/MatchController.js";
 interface Props {
   config: MatchConfig;
   onExit: () => void;
+  /** Career: vuurt eenmalig bij fulltime met de eindstand. */
+  onFinish?: (homeGoals: number, awayGoals: number) => void;
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -16,9 +18,18 @@ const PHASE_LABEL: Record<string, string> = {
   deadball: "Spelhervatting",
 };
 
-export function MatchScreen({ config, onExit }: Props) {
+export function MatchScreen({ config, onExit, onFinish }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [snap, setSnap] = useState<MatchSnapshot | null>(null);
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    if (!snap || finishedRef.current) return;
+    if (snap.phase === "fulltime") {
+      finishedRef.current = true;
+      onFinish?.(snap.score.home, snap.score.away);
+    }
+  }, [snap, onFinish]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
