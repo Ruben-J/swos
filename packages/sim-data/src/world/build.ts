@@ -16,6 +16,7 @@ import {
 import { FIRST_NAMES, LAST_NAMES } from "../names.js";
 import { generateSquad, teamRating } from "./squad.js";
 import { COUNTRIES, type ClubSeed } from "./catalogue.js";
+import { CLUB_SQUADS } from "./squads/index.js";
 import { buildDoubleRoundRobin } from "../career/fixtures.js";
 import { addDays } from "../career/dates.js";
 
@@ -86,7 +87,10 @@ function makeTeam(
     },
   };
 
-  const players = generateSquad(rng, teamId, seed.strength, countryCode, refYear, NAME_POOL);
+  // Echte (verbasterde) selectie van deze club indien beschikbaar, anders
+  // procedureel met de generieke naam-pool.
+  const roster = CLUB_SQUADS[seed.name];
+  const players = generateSquad(rng, teamId, seed.strength, countryCode, refYear, NAME_POOL, roster);
   const seasonEnd = `${refYear + rng.int(1, 4)}-06-30`;
   const contracts: Contract[] = players.map((p, i) => ({
     id: rngId(rng),

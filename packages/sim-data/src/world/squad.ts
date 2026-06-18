@@ -109,7 +109,19 @@ export interface NamePool {
   last: readonly string[];
 }
 
-/** Genereer een 16-koppige selectie voor een club met gegeven sterkte (0..1). */
+/** Een vaste, op de echte selectie gebaseerde (verbasterde) speler. */
+export interface RosterEntry {
+  first: string;
+  last: string;
+  pos: Position;
+}
+
+/**
+ * Genereer de selectie van een club. Is een `roster` (verbasterde echte
+ * selectie) gegeven, dan worden naam + positie daaruit overgenomen en alleen de
+ * attributen procedureel uit de clubsterkte afgeleid. Anders volledig
+ * procedureel met een naam-pool.
+ */
 export function generateSquad(
   rng: Rng,
   teamId: string,
@@ -117,7 +129,21 @@ export function generateSquad(
   nationality: string,
   refYear: number,
   names: NamePool,
+  roster?: RosterEntry[],
 ): Player[] {
+  if (roster && roster.length >= 11) {
+    return roster.map((r) =>
+      generatePlayer(rng, teamId, {
+        quality,
+        nationality,
+        refYear,
+        position: r.pos,
+        firstName: r.first,
+        lastName: r.last,
+      }),
+    );
+  }
+
   const usedLast = new Set<string>();
   const pickLast = (): string => {
     for (let t = 0; t < 40; t++) {
