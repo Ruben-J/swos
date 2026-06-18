@@ -1,9 +1,10 @@
-import { useMemo } from "react";
-import { Rng, hashSeed, type CareerSave, type Match, type UUID } from "@pitch/shared";
+import { useMemo, useState } from "react";
+import { Rng, hashSeed, type CareerSave, type Match, type Player, type UUID } from "@pitch/shared";
 import {
   divisionStandings,
   formatShort,
   playMatchday,
+  playerOverall,
   seasonComplete,
   teamNextMatch,
 } from "@pitch/sim-data";
@@ -23,9 +24,19 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const myDivision = ws.divisions.find((d) => d.id === myTeam.divisionId)!;
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
+  const [tab, setTab] = useState<"overzicht" | "selectie">("overzicht");
+
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
   const standings = useMemo(() => divisionStandings(save, myTeam.divisionId), [save, myTeam.divisionId]);
   const done = useMemo(() => seasonComplete(save), [save]);
+
+  const squad = useMemo(() => {
+    const order: Record<string, number> = { GK: 0, RB: 1, CB: 2, LB: 3, DM: 4, CM: 5, AM: 6, RW: 7, LW: 8, ST: 9 };
+    return ws.players
+      .filter((p) => p.teamId === myTeamId)
+      .map((p) => ({ p, ovr: playerOverall(p) }))
+      .sort((a, b) => (order[a.p.preferredPositions[0] ?? "CM"]! - order[b.p.preferredPositions[0] ?? "CM"]!) || b.ovr - a.ovr);
+  }, [ws.players, myTeamId]);
 
   const teamName = (id: UUID): string => ws.teams.find((t) => t.id === id)?.name ?? "?";
   const teamShort = (id: UUID): string => ws.teams.find((t) => t.id === id)?.shortName ?? "?";
@@ -64,6 +75,20 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
           </div>
         </div>
         <div className="ch-right">
+          <div className="ch-tabs">
+            <button
+              className={`ch-tab${tab === "overzicht" ? " sel" : ""}`}
+              onClick={() => setTab("overzicht")}
+            >
+              Overzicht
+            </button>
+            <button
+              className={`ch-tab${tab === "selectie" ? " sel" : ""}`}
+              onClick={() => setTab("selectie")}
+            >
+              Selectie
+            </button>
+          </div>
           <div className="ch-date">{formatShort(season.currentDate)}</div>
           <button className="btn" onClick={onExit}>
             Opslaan &amp; terug
@@ -71,7 +96,35 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
         </div>
       </header>
 
-      <div className="ch-body">
+      {tab === "selectie" && (
+        <div className="ch-body">
+          <section className="ch-panel ch-squad">
+            <h2>Selectie — {myTeam.name}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th className="ch-tn">Naam</th>
+                  <th>Pos</th>
+                  <th>Lft</th>
+                  <th>Pac</th>
+                  <th>Sho</th>
+                  <th>Pas</th>
+                  <th>Tac</th>
+                  <th>OVR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {squad.map(({ p, ovr }, i) => (
+                  <SquadRow key={p.id} p={p} ovr={ovr} num={i + 1} />
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      )}
+
+      <div className="ch-body" style={tab === "selectie" ? { display: "none" } : undefined}>
         <section className="ch-panel ch-next">
           <h2>Volgende wedstrijd</h2>
           {nextMatch ? (
@@ -179,5 +232,25 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
         </section>
       </div>
     </div>
+  );
+}
+
+function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
+  const a = p.attributes;
+  const isGk = (p.preferredPositions[0] ?? "CM") === "GK";
+  return (
+    <tr>
+      <td>{num}</td>
+      <td className="ch-tn">
+        {p.firstName[0]}. {p.lastName}
+      </td>
+      <td>{p.preferredPositions[0]}</td>
+      <td>{p.ageYears}</td>
+      <td>{a.pace}</td>
+      <td>{isGk ? (a.goalkeeping ?? "-") : a.shooting}</td>
+      <td>{a.passing}</td>
+      <td>{a.tackling}</td>
+      <td className="ch-pts">{ovr}</td>
+    </tr>
   );
 }
