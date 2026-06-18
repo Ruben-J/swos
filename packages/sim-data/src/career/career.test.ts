@@ -5,6 +5,7 @@ import { computeStandings } from "./standings.js";
 import { buildWorld } from "../world/build.js";
 import { createCareer } from "../world/build.js";
 import { divisionStandings, playMatchday, seasonComplete, teamNextMatch } from "./season.js";
+import { advanceToNextSeason } from "./rollover.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -102,5 +103,61 @@ describe("career-seizoen", () => {
     // gespeelde wedstrijden = 16*30/2 = 240.
     const totalPlayed = table.reduce((s, r) => s + r.played, 0);
     expect(totalPlayed).toBe(16 * 30);
+  });
+
+  it("seizoensovergang: promotie/degradatie + nieuw seizoen", () => {
+    const world = buildWorld(new Rng(42), 2025);
+    let save = createCareer(world, { seed: 7, managerName: "T", teamId: world.teams[0]!.id });
+    const myTeam = world.teams[0]!;
+
+    // Speel het seizoen uit.
+    const simRng = new Rng(1);
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 80) {
+      const m = save.worldState.matches.find((x) => x.state === "scheduled")!;
+      save = playMatchday(save, simRng, m.date);
+      guard++;
+    }
+
+    // Onthoud eindstanden van een tier-1 + tier-2 paar (Engeland).
+    const engDivs = world.divisions
+      .filter((d) => d.countryCode === "ENG")
+      .sort((a, b) => a.tier - b.tier);
+    const t1 = engDivs[0]!;
+    const t2 = engDivs[1]!;
+    const t1Final = divisionStandings(save, t1.id).map((r) => r.teamId);
+    const t2Final = divisionStandings(save, t2.id).map((r) => r.teamId);
+    const relegated = t1Final.slice(t1Final.length - t1.relegationSlots);
+    const promoted = t2Final.slice(0, t2.promotionSlots);
+
+    const prevSeasonId = save.worldState.activeSeasonId;
+    const ageBefore = save.worldState.players[0]!.ageYears;
+    const { save: next, rollover } = advanceToNextSeason(save, new Rng(99));
+    save = next;
+
+    // Nieuw actief seizoen, nieuwe kalender.
+    expect(save.worldState.activeSeasonId).not.toBe(prevSeasonId);
+    expect(save.worldState.seasons.length).toBe(2);
+    expect(save.worldState.players[0]!.ageYears).toBe(ageBefore + 1);
+
+    // Gedegradeerde teams staan nu in tier 2, promovendi in tier 1.
+    for (const id of relegated) {
+      expect(save.worldState.teams.find((t) => t.id === id)!.divisionId).toBe(t2.id);
+    }
+    for (const id of promoted) {
+      expect(save.worldState.teams.find((t) => t.id === id)!.divisionId).toBe(t1.id);
+    }
+    expect(rollover.moves.length).toBeGreaterThan(0);
+
+    // Beide divisies houden 16 clubs.
+    expect(save.worldState.teams.filter((t) => t.divisionId === t1.id).length).toBe(16);
+    expect(save.worldState.teams.filter((t) => t.divisionId === t2.id).length).toBe(16);
+
+    // Het nieuwe seizoen heeft weer een volledige kalender voor mijn (mogelijk
+    // andere) divisie.
+    const myDivNow = save.worldState.teams.find((t) => t.id === myTeam.id)!.divisionId;
+    const next1 = teamNextMatch(save.worldState.matches, myTeam.id);
+    expect(next1).not.toBeNull();
+    expect(divisionStandings(save, myDivNow).length).toBe(16);
   });
 });

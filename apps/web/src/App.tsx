@@ -1,15 +1,16 @@
 import { useCallback, useState } from "react";
 import type { MatchConfig } from "@pitch/engine";
 import { Rng, hashSeed, type CareerSave, type Match } from "@pitch/shared";
-import { playMatchday, quickMatchSetup } from "@pitch/sim-data";
+import { advanceToNextSeason, playMatchday, quickMatchSetup } from "@pitch/sim-data";
 import { MainMenu } from "./screens/MainMenu.js";
 import { MatchScreen } from "./screens/MatchScreen.js";
 import { CareerSetup } from "./career/CareerSetup.js";
+import { CareerLoad } from "./career/CareerLoad.js";
 import { CareerHub } from "./screens/CareerHub.js";
 import { buildMatchConfig } from "./career/careerMatch.js";
 import { putSave } from "./storage/saves.js";
 
-type Screen = "menu" | "match" | "careerSetup" | "careerHub";
+type Screen = "menu" | "match" | "careerSetup" | "careerLoad" | "careerHub";
 
 export function App() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -73,6 +74,13 @@ export function App() {
     [career, careerMatch, persist],
   );
 
+  const nextSeason = useCallback(() => {
+    if (!career) return;
+    const rng = new Rng(hashSeed(`${career.id}:rollover:${career.worldState.activeSeasonId}`));
+    const { save } = advanceToNextSeason(structuredClone(career), rng);
+    persist(save);
+  }, [career, persist]);
+
   const exitMatch = useCallback(() => {
     // Verlaten zonder uit te spelen: career-wedstrijd niet toepassen.
     setConfig(null);
@@ -94,12 +102,25 @@ export function App() {
     return <CareerSetup onStart={startCareer} onCancel={() => setScreen("menu")} />;
   }
 
+  if (screen === "careerLoad") {
+    return (
+      <CareerLoad
+        onLoad={(save) => {
+          setCareer(save);
+          setScreen("careerHub");
+        }}
+        onCancel={() => setScreen("menu")}
+      />
+    );
+  }
+
   if (screen === "careerHub" && career) {
     return (
       <CareerHub
         save={career}
         onUpdate={persist}
         onPlayMatch={playCareerMatch}
+        onNextSeason={nextSeason}
         onExit={() => setScreen("menu")}
       />
     );
@@ -110,6 +131,7 @@ export function App() {
       onQuickMatch={startQuickMatch}
       onLocalVersus={startLocalVersus}
       onCareer={() => setScreen("careerSetup")}
+      onLoadCareer={() => setScreen("careerLoad")}
     />
   );
 }

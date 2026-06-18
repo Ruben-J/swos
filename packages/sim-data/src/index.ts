@@ -8,3 +8,4 @@ export * from "./career/standings.js";
 export * from "./career/quicksim.js";
 export * from "./career/dates.js";
 export * from "./career/season.js";
+export * from "./career/rollover.js";

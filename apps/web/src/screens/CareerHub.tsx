@@ -12,10 +12,11 @@ interface Props {
   save: CareerSave;
   onUpdate: (save: CareerSave) => void;
   onPlayMatch: (match: Match) => void;
+  onNextSeason: () => void;
   onExit: () => void;
 }
 
-export function CareerHub({ save, onUpdate, onPlayMatch, onExit }: Props) {
+export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }: Props) {
   const ws = save.worldState;
   const myTeamId = save.manager.currentTeamId;
   const myTeam = ws.teams.find((t) => t.id === myTeamId)!;
@@ -97,8 +98,18 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onExit }: Props) {
               </div>
             </>
           ) : done ? (
-            <div className="ch-done">
-              Seizoen afgelopen — kampioen: <strong>{teamName(standings[0]?.teamId ?? "")}</strong>
+            <div className="ch-season-end">
+              <div className="ch-done">
+                Seizoen afgelopen — kampioen <strong>{teamName(standings[0]?.teamId ?? "")}</strong>.
+              </div>
+              <div className="ch-myrank">
+                {myTeam.name} eindigde als{" "}
+                <strong>{standings.find((r) => r.teamId === myTeamId)?.rank ?? "?"}e</strong> in{" "}
+                {myDivision.name}.
+              </div>
+              <button className="btn primary" onClick={onNextSeason}>
+                Volgend seizoen
+              </button>
             </div>
           ) : (
             <div className="ch-done">Geen wedstrijd ingepland.</div>

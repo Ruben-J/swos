@@ -2,9 +2,10 @@ interface Props {
   onQuickMatch: () => void;
   onLocalVersus: () => void;
   onCareer: () => void;
+  onLoadCareer: () => void;
 }
 
-export function MainMenu({ onQuickMatch, onLocalVersus, onCareer }: Props) {
+export function MainMenu({ onQuickMatch, onLocalVersus, onCareer, onLoadCareer }: Props) {
   return (
     <div className="menu">
       <div>
@@ -20,6 +21,9 @@ export function MainMenu({ onQuickMatch, onLocalVersus, onCareer }: Props) {
         </button>
         <button className="btn" onClick={onCareer}>
           Carrièremodus
+        </button>
+        <button className="btn" onClick={onLoadCareer}>
+          Carrière laden
         </button>
         <button className="btn" disabled title="Komt in een latere fase">
           Opties

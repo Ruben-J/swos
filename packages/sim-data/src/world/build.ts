@@ -148,7 +148,7 @@ export function buildWorld(rng: Rng, refYear: number): World {
 const WEATHER: Match["kickoffWeather"][] = ["dry", "dry", "dry", "wet", "windy"];
 
 /** Maak de league-competities + volledige wedstrijdkalender voor één seizoen. */
-function buildSeasonFixtures(
+export function buildSeasonFixtures(
   rng: Rng,
   seasonId: UUID,
   divisions: Division[],
