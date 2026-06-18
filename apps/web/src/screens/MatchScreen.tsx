@@ -208,7 +208,7 @@ function TeamLineup({ team, align }: { team: LineupTeam; align: "left" | "right"
 
 /** Mini-veld met de spelers op hun formatieplek (rugnummers). */
 function FormationPitch({ team }: { team: LineupTeam }) {
-  const spots = layoutFormation(team.players);
+  const spots = layoutFormation(team.players, team.formationName);
   return (
     <svg className="formation-pitch" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid meet">
       <rect x="1" y="1" width="98" height="138" rx="3" className="fp-bg" />
@@ -226,35 +226,36 @@ function FormationPitch({ team }: { team: LineupTeam }) {
   );
 }
 
-/** Plaats spelers op een verticaal mini-veld (GK onder, aanval boven). */
-function layoutFormation(players: LineupTeam["players"]): { num: number; x: number; y: number }[] {
-  const lineOf = (pos: string): number =>
-    pos === "GK" ? 0 : "RB LB CB".includes(pos) ? 1 : pos === "DM" ? 2 : pos === "AM" ? 3 : "RW LW ST".includes(pos) ? 4 : 2.6;
+/**
+ * Plaats spelers op een verticaal mini-veld op basis van de FORMATIE (niet het
+ * losse positie-label): "4-4-2" -> linies [GK, 4 verdedigers, 4 middenvelders,
+ * 2 aanvallers]. De spelerslijst staat in formatie-volgorde (GK eerst), dus we
+ * delen die op in opeenvolgende linies. Zo zie je echt 4-4-2 i.p.v. 4 voorin.
+ */
+function layoutFormation(
+  players: LineupTeam["players"],
+  formationName: string | undefined,
+): { num: number; x: number; y: number }[] {
+  const segs = (formationName ?? "4-4-2").split("-").map((n) => parseInt(n, 10)).filter((n) => n > 0);
+  const lineSizes = [1, ...(segs.length ? segs : [4, 4, 2])]; // GK + linies
   const xHint = (pos: string): number =>
     pos === "RB" || pos === "RW" ? 1 : pos === "LB" || pos === "LW" ? -1 : 0;
-  const yForLine = [122, 100, 80, 55, 28];
-  const yAt = (line: number): number => {
-    const lo = yForLine[Math.floor(line)] ?? 70;
-    const hi = yForLine[Math.ceil(line)] ?? lo;
-    return lo + (hi - lo) * (line - Math.floor(line));
-  };
+  const nLines = lineSizes.length;
+  // y per linie: GK onderaan (122), aanval bovenaan (~26).
+  const yAt = (line: number): number => 122 - (line / (nLines - 1)) * 96;
 
-  const byLine = new Map<number, LineupTeam["players"]>();
-  for (const p of players) {
-    const ln = lineOf(p.position);
-    const arr = byLine.get(ln) ?? [];
-    arr.push(p);
-    byLine.set(ln, arr);
-  }
   const out: { num: number; x: number; y: number }[] = [];
-  for (const [ln, group] of byLine) {
+  let idx = 0;
+  lineSizes.forEach((size, line) => {
+    const group = players.slice(idx, idx + size);
+    idx += size;
     const sorted = [...group].sort((a, b) => xHint(a.position) - xHint(b.position) || a.shirtNumber - b.shirtNumber);
     const n = sorted.length;
     sorted.forEach((p, i) => {
       const x = n === 1 ? 50 : 18 + (64 * i) / (n - 1);
-      out.push({ num: p.shirtNumber, x, y: yAt(ln) });
+      out.push({ num: p.shirtNumber, x, y: yAt(line) });
     });
-  }
+  });
   return out;
 }
 
