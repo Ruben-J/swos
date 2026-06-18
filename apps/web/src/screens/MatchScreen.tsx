@@ -251,8 +251,11 @@ function layoutFormation(
     idx += size;
     const sorted = [...group].sort((a, b) => xHint(a.position) - xHint(b.position) || a.shirtNumber - b.shirtNumber);
     const n = sorted.length;
+    // Symmetrisch rond het midden (50), met begrensde tussenafstand: zo staan
+    // bv. de 2 spitsen in een 4-4-2 netjes gecentreerd i.p.v. aan de zijkanten.
+    const spacing = n > 1 ? Math.min(20, 64 / (n - 1)) : 0;
     sorted.forEach((p, i) => {
-      const x = n === 1 ? 50 : 18 + (64 * i) / (n - 1);
+      const x = 50 + (i - (n - 1) / 2) * spacing;
       out.push({ num: p.shirtNumber, x, y: yAt(line) });
     });
   });
