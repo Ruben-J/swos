@@ -351,6 +351,25 @@ export class MatchSim {
         }
       }
 
+      // AI-schoten zijn niet perfect: voeg richting-scatter toe zodat de
+      // computer niet elke bal pijlrecht in de hoek mikt. Dichtbij = nauwkeurig,
+      // van afstand = wild; betere shooting = strakker. Een mens mikt zelf en
+      // wordt niet verstoord. Zo blijft de keeper de meeste AI-schoten pakken
+      // terwijl een bewust geplaatst menselijk schot er wél in kan.
+      if (!isHumanActive && !p.isKeeper && cmd.kick && !cmd.kick.targetId) {
+        const goal = attackingGoal(p.side);
+        const dGoal = dist(p.pos, goal);
+        const toGoal = normalize({ x: goal.x - p.pos.x, y: goal.y - p.pos.y });
+        const aim = cmd.kick.dir;
+        const dot = aim.x * toGoal.x + aim.y * toGoal.y;
+        if (dGoal < 28 && dot > 0.6) {
+          const sh = p.stats.shooting / 100;
+          const sigma = (0.04 + dGoal * 0.011) * (1.5 - sh);
+          const ang = Math.atan2(aim.y, aim.x) + this.rng.gaussian(0, sigma);
+          cmd.kick.dir = { x: Math.cos(ang), y: Math.sin(ang) };
+        }
+      }
+
       this.applyCommand(p, cmd, dt);
     }
 
@@ -959,10 +978,10 @@ export class MatchSim {
     // Reactietijd: de keeper "leest" het schot pas als het dichtbij genoeg is —
     // hij kan niet een seconde van tevoren al naar de hoek vertrekken. Daardoor
     // halen harde, in de hoek geplaatste schoten het net wél.
-    if (t < 0.02 || t > 0.5) return;
+    if (t < 0.02 || t > 0.32) return;
     // Voorspelfout: de keeper schat het kruispunt niet perfect (groter bij een
     // sneller schot). Zo glipt een goed geplaatst schot er soms langs.
-    const predErr = this.rng.gaussian(0, 0.25 + speed * 0.012);
+    const predErr = this.rng.gaussian(0, 0.5 + speed * 0.022);
     const crossY = this.ball.pos.y + this.ball.vel.y * t + predErr;
     // Mist het doel sowieso? Dan niet duiken.
     const top = PITCH.height / 2 - PITCH.goalWidth / 2 - 1.5;
@@ -976,7 +995,7 @@ export class MatchSim {
     const dir = { x: gapX / gap, y: gapY / gap };
     // Duiksnelheid begrensd door keeperskwaliteit. Bewust niet hoog: de keeper
     // kan niet de hele goal afdekken, dus de hoeken blijven kwetsbaar.
-    const diveSpeed = 7 + (p.stats.goalkeeping / 100) * 4; // 7..11 u/s
+    const diveSpeed = 3.2 + (p.stats.goalkeeping / 100) * 2; // 3.2..5.2 u/s
     const need = gap / Math.max(0.08, t);
     const v = Math.min(diveSpeed, need);
     p.vel.x = dir.x * v;
@@ -1009,7 +1028,7 @@ export class MatchSim {
       // hoekschot halen, dan moet hij er fysiek voor duiken/lopen (AI-laag).
       // Lijf + armbereik van de keeper (armen tellen als "het poppetje zelf" —
       // geen magie op afstand, wel iets meer dan een veldspeler-straal).
-      const baseR = PLAYER.radius + BALL.radius + 0.1 + (p.stats.goalkeeping / 100) * 0.6;
+      const baseR = PLAYER.radius + BALL.radius + 0.05 + (p.stats.goalkeeping / 100) * 0.3;
       const speed = len(this.ball.vel);
       const goalX = p.side === "home" ? 0 : PITCH.width;
       const towardGoal = goalX === 0 ? this.ball.vel.x < -3 : this.ball.vel.x > 3;
@@ -1043,7 +1062,7 @@ export class MatchSim {
       const easy = speed < 14 && this.ball.z < 1.4 && stretch < 0.6 && finBonus < 0.3;
       // Anders: kans op klemvast daalt met snelheid, hoogte, strek en afwerking.
       const catchProb =
-        0.72 +
+        0.84 +
         0.3 * (p.stats.goalkeeping / 100) -
         speed * 0.012 -
         this.ball.z * 0.14 -
@@ -1073,15 +1092,19 @@ export class MatchSim {
     }
   }
 
-  /** Keeper bokst de bal weg van het doel: losse bal, lichte spreiding. */
+  /** Keeper bokst de bal weg van het doel: bij voorkeur ZIJWAARTS naar de
+   *  dichtstbijzijnde zijlijn (breed weg van het centrum), zodat hij niet recht
+   *  voor de voeten van een inlopende spits terugvalt. */
   private parryBall(gk: PlayerEntity): void {
     const outX = gk.pos.x < PITCH.width / 2 ? 1 : -1; // weg van eigen doel
-    // Zijwaartse component zodat hij niet recht terug het doel in gaat.
-    const lateral = this.rng.range(-0.8, 0.8);
-    const dir = normalize({ x: outX, y: lateral });
-    const power = 9 + this.rng.range(0, 4);
+    // Naar de dichtstbijzijnde zijlijn boksen (af en toe de andere kant op).
+    const sideSign = gk.pos.y < PITCH.height / 2 ? -1 : 1;
+    const flip = this.rng.chance(0.25) ? -1 : 1;
+    const lateral = sideSign * flip * this.rng.range(1.0, 1.9);
+    const dir = normalize({ x: outX * this.rng.range(0.4, 0.85), y: lateral });
+    const power = 12 + this.rng.range(0, 6); // harder wegwerken, klaart de zone
     this.ball.vel = { x: dir.x * power, y: dir.y * power };
-    this.ball.vz = this.rng.range(1.5, 4); // omhoog geklopt
+    this.ball.vz = this.rng.range(2, 5); // omhoog geklopt
     this.ball.ownerId = null;
     this.ballProtectedFor = null;
     this.ball.sinceKick = 0; // voorkomt dat de keeper 'm meteen terugpakt

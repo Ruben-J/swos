@@ -492,9 +492,12 @@ export function computeAiCommand(
   return cmd;
 }
 
-/** Mikpunt voor een schot: de doelhoek het verst van de keeper vandaan. */
+/** Mikpunt voor een schot: weg van de keeper, maar bewust NIET pal in de
+ *  bovenhoek. De computer mikt gematigd (binnen de "veilige" zone) zodat hij
+ *  niet elke bal perfect in de kruising legt; een mens kan zelf scherper mikken
+ *  en zo vaker scoren. */
 function shotTarget(opponents: PlayerEntity[], myGoal: Vec2): Vec2 {
-  const half = PITCH.goalWidth / 2 - 0.5;
+  const half = 1.9; // gematigd, niet de uiterste hoek (paal ligt op ~3.66)
   const gk = opponents.find((o) => o.isKeeper);
   if (!gk) return { x: myGoal.x, y: myGoal.y };
   // Keeper boven het midden -> mik onder, en omgekeerd.
@@ -515,7 +518,7 @@ function onBallCommand(
 
   // Schieten binnen bereik: mik op de hoek wég van de keeper (niet recht op 'm).
   const aimGoal = shotTarget(opponents, myGoal);
-  if (distToGoal < 20 && !laneBlocked(player.pos, aimGoal, opponents, 1.4)) {
+  if (distToGoal < 13 && !laneBlocked(player.pos, aimGoal, opponents, 1.4)) {
     cmd.kick = {
       dir: dirTo(player, aimGoal),
       power: 34 + (player.stats.shooting / 100) * 12,
