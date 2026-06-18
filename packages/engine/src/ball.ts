@@ -77,6 +77,11 @@ export function applyAftertouch(ball: BallState, input: Vec2): void {
   if (back > 0) {
     const loft = Math.min(1, back * 1.5);
     ball.vz += loft * BALL.aftertouchLoft * 0.016;
+    // De omhoog gestuurde energie kost een beetje voorwaartse snelheid, zodat de
+    // bal omhoog gaat i.p.v. vooruit te "versnellen".
+    const bleed = 1 - loft * 0.02;
+    ball.vel.x *= bleed;
+    ball.vel.y *= bleed;
   }
 }
 

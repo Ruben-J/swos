@@ -526,11 +526,14 @@ export class MatchSim {
           // ECHT korte tik tikt de bal alleen even voor je uit (zacht).
           const ramp = clamp(hold / 0.15, 0, 1);
           const power = 8 + ramp * (full - 8);
-          const lift = clamp((hold - 0.15) / 0.5, 0, 1); // pas daarna ietsje hoger
+          // Langer inhouden tilt de bal echt van de grond. loft = opwaartse
+          // beginsnelheid; piek ≈ loft²/(2·g). lift 0..1 over ~0.5s -> tot ~10
+          // u/s -> ruim 2 m hoog. Echte krul/extra hoogte nog via aftertouch.
+          const lift = clamp((hold - 0.15) / 0.5, 0, 1);
           cmd.kick = {
             dir: { x: Math.cos(p.facing), y: Math.sin(p.facing) },
             power,
-            loft: ramp * 0.4 + lift * 2.4,
+            loft: ramp * 0.5 + lift * 9.5,
             curve: 0,
           };
         } else {

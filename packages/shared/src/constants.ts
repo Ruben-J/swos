@@ -39,8 +39,10 @@ export const BALL = {
   radius: 0.35,
   /** Grondwrijving per seconde als fractie van snelheid (rolweerstand). */
   groundFriction: 0.62,
-  /** Luchtweerstand voor de grondvector wanneer de bal in de lucht is. */
-  airDrag: 0.12,
+  /** Luchtweerstand voor de grondvector wanneer de bal in de lucht is. Niet te
+   *  laag t.o.v. groundFriction, anders lijkt een geloft schot te "versnellen"
+   *  (het remt dan veel minder af dan een rollende bal). */
+  airDrag: 0.24,
   /** Zwaartekracht op de hoogte-as (z), in units/s^2. */
   gravity: 22,
   /** Restitutie (stuiterbehoud) bij grondcontact op de z-as. */
