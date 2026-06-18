@@ -1493,15 +1493,16 @@ export class MatchSim {
     // nog hoog, dus klem de voorhoede op de buitenspellijn (bal op de doellijn).
     clampOffside(m, this.players, takingSide, { x: ownGoalX, y: PITCH.height / 2 });
 
-    // Tegenstander: compact pressblok tussen de middenlijn en de rand van het
-    // strafschopgebied van de nemer — geen spelers die hoog bij dat doel blijven
-    // hangen. De meest aanvallende drukt het hoogst, verdedigers zakken terug.
-    const pressLine = ownGoalX + sign * (PITCH.penaltyBoxDepth + 6);
-    const backLine = PITCH.width / 2;
+    // Tegenstander zakt ECHT terug bij een doeltrap: de voorste spelers staan
+    // rond de middenlijn, de verdedigers op de eigen helft. Zo houdt de keeper
+    // de box + opbouwzone vrij en heeft hij gewoon korte afspeelmogelijkheden.
+    // (advForward = doel-ver-kant van de nemer; hoog adv = dichter bij middenlijn.)
+    const advForward = ownGoalX + sign * (PITCH.width * 0.46); // rond de middenlijn
+    const deepBack = ownGoalX + sign * (PITCH.width * 0.66); // op de eigen helft
     for (const p of this.players) {
       if (p.side === takingSide || p.isKeeper) continue;
       const adv = clamp(roleAdvance(p.position) / 0.55, 0, 1);
-      const x = clamp(backLine + (pressLine - backLine) * adv, 4, PITCH.width - 4);
+      const x = clamp(deepBack + (advForward - deepBack) * adv, 4, PITCH.width - 4);
       m.set(p.id, { x, y: clamp(p.anchor.y, 5, PITCH.height - 5) });
     }
     return m;
