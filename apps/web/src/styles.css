@@ -670,26 +670,30 @@ kbd {
   padding-top: 1.2rem;
 }
 
-/* --- Match intro (opkomst) --- */
-.intro-overlay {
+/* --- Match opkomst (lineups) --- */
+.lineups-overlay {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  inset: 0;
   display: flex;
-  align-items: center;
-  cursor: pointer;
+  align-items: stretch;
+  justify-content: space-between;
+  padding: 1.5rem 1.5vw;
+  pointer-events: none;
   z-index: 30;
 }
-.intro-left {
-  left: 0;
-  justify-content: flex-start;
+.lineup-card {
+  background: rgba(12, 17, 22, 0.9);
+  border: 1px solid #2a3742;
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  width: 250px;
+  align-self: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.lineup-left {
   animation: introIn 0.4s ease;
 }
-.intro-right {
-  right: 0;
-  justify-content: flex-end;
+.lineup-right {
   animation: introInRight 0.4s ease;
 }
 @keyframes introIn {
@@ -700,14 +704,23 @@ kbd {
   from { transform: translateX(40px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
-.intro-card {
-  background: rgba(12, 17, 22, 0.92);
-  border: 1px solid #2a3742;
-  border-radius: 12px;
-  margin: 0 2vw;
-  padding: 1rem 1.3rem;
-  min-width: 260px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+.formation-pitch {
+  width: 100%;
+  height: 150px;
+  margin: 0.5rem 0 0.7rem;
+}
+.formation-pitch .fp-bg {
+  fill: rgba(31, 122, 69, 0.25);
+  stroke: #2a3742;
+  stroke-width: 1;
+}
+.formation-pitch .fp-line {
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 1;
+}
+.formation-pitch .fp-num {
+  font-size: 7px;
+  font-weight: 700;
 }
 .intro-team {
   display: flex;

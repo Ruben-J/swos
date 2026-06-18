@@ -47,6 +47,8 @@ const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
 const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
 const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
+const WALKOUT_DURATION = 6.0; // s waarin de spelers vanaf de middenlijn opkomen
+const WALKOUT_WALK_SPEED = 9.0; // u/s wandeltempo tijdens de opkomst
 
 /** Soort spelhervatting (stuurt nemer-keuze en voorsortering van de ploegen). */
 type RestartKind = "kickoff" | "throwin" | "goalkick" | "corner" | "freekick" | "penalty";
@@ -113,6 +115,8 @@ export class MatchSim {
   matchSeconds = 0;
   phase: MatchPhase = "kickoff";
   private phaseTimer = 0;
+  private walkoutTargets = new Map<string, Vec2>();
+  private walkoutTimer = 0;
   private half = 1;
   /** Huidige helft (1/2) — voor de presentatie-rotatie van het veld. */
   get currentHalf(): number {
@@ -160,7 +164,37 @@ export class MatchSim {
     this.buildTeam(config.home, "home");
     this.buildTeam(config.away, "away");
     this.kickoffSide = this.rng.chance() ? "home" : "away";
-    this.resetForKickoff(this.kickoffSide);
+    this.startWalkout(this.kickoffSide);
+  }
+
+  /**
+   * Opkomst: de spelers lopen vanaf de middenlijn (scherm-links) het veld op
+   * naar hun aftrappositie. Tijdens deze fase tonen we de opstellingen. Daarna
+   * gaat het over in de normale aftrap.
+   */
+  private startWalkout(side: Side): void {
+    // Bepaal eerst de aftrapposities (resetForKickoff zet ze) en bewaar die als
+    // looptarget; daarna zetten we iedereen terug bij de tunnel-ingang.
+    this.resetForKickoff(side);
+    this.walkoutTargets.clear();
+    for (const p of this.players) this.walkoutTargets.set(p.id, { ...p.pos });
+
+    // Ingang: bij de middenlijn, net buiten de zijlijn op y≈0 (scherm-links in
+    // de 1e helft). De spelers staan in de "tunnel" (negatieve y) en lopen op.
+    const halfX = PITCH.width / 2;
+    const order = this.players.filter((p) => p.side === "home").concat(
+      this.players.filter((p) => p.side === "away"),
+    );
+    order.forEach((p, i) => {
+      const lane = p.side === "home" ? -1.3 : 1.3;
+      p.pos = { x: halfX + lane, y: -1 - i * 0.75 };
+      p.vel = { x: 0, y: 0 };
+      p.state = "run";
+      p.facing = Math.PI / 2; // kijkt het veld in (richting +y)
+    });
+
+    this.phase = "walkout";
+    this.walkoutTimer = WALKOUT_DURATION;
   }
 
   private buildTeam(setup: TeamSetup, side: Side): void {
@@ -268,7 +302,10 @@ export class MatchSim {
   /** Eén vaste sim-stap. humanIntent geldt voor de actieve speler van humanSide. */
   step(dt: number, humanIntent: PlayerIntent = emptyIntent()): void {
     // Fasebeheer.
-    if (this.phase === "kickoff" || this.phase === "deadball") {
+    if (this.phase === "walkout") {
+      this.stepWalkout(dt);
+      return;
+    } else if (this.phase === "kickoff" || this.phase === "deadball") {
       this.stepRestart(dt, humanIntent);
       return;
     } else if (this.phase === "goal") {
@@ -1218,6 +1255,41 @@ export class MatchSim {
   }
 
   /** Spelers driften naar hun aftrap-posities (eigen helft) tijdens een pauze. */
+  /** Opkomst: loop iedereen naar zijn aftrappositie; daarna over naar de aftrap. */
+  private stepWalkout(dt: number): void {
+    this.walkoutTimer -= dt;
+    let allArrived = true;
+    for (const p of this.players) {
+      const t = this.walkoutTargets.get(p.id);
+      if (!t) continue;
+      const to = { x: t.x - p.pos.x, y: t.y - p.pos.y };
+      const d = len(to);
+      if (d > 0.25) {
+        allArrived = false;
+        const step = Math.min(d, WALKOUT_WALK_SPEED * dt);
+        p.pos.x += (to.x / d) * step;
+        p.pos.y += (to.y / d) * step;
+        p.facing = angleOf(to);
+        p.state = "run";
+      } else {
+        p.pos.x = t.x;
+        p.pos.y = t.y;
+        p.state = "idle";
+      }
+      p.vel = { x: 0, y: 0 };
+    }
+    if (this.walkoutTimer <= 0 || allArrived) {
+      for (const p of this.players) {
+        const t = this.walkoutTargets.get(p.id);
+        if (t) p.pos = { ...t };
+        p.state = "idle";
+        p.facing = p.side === "home" ? 0 : Math.PI;
+      }
+      // De aftrapstaat is al gezet door resetForKickoff in startWalkout.
+      this.phase = "kickoff";
+    }
+  }
+
   private driftToKickoff(dt: number): void {
     const halfX = PITCH.width / 2;
     for (const p of this.players) {

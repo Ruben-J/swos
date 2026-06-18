@@ -18,28 +18,13 @@ const PHASE_LABEL: Record<string, string> = {
   deadball: "Spelhervatting",
 };
 
-type IntroStage = "home" | "away" | "done";
-
 export function MatchScreen({ config, onExit, onFinish }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [snap, setSnap] = useState<MatchSnapshot | null>(null);
   const finishedRef = useRef(false);
-  const [intro, setIntro] = useState<IntroStage>("home");
-  const introStarted = useRef(false);
 
-  // Opkomst-intro: eerst de thuisopstelling, dan de uitopstelling, dan weg.
-  // Pas starten zodra de wedstrijd geladen is (eerste snapshot), zodat de intro
-  // niet al tijdens het laden van de renderer wegtikt.
-  useEffect(() => {
-    if (!snap || introStarted.current) return;
-    introStarted.current = true;
-    const t1 = setTimeout(() => setIntro("away"), 2600);
-    const t2 = setTimeout(() => setIntro("done"), 5200);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [snap]);
+  // Tijdens de opkomst (spelers lopen het veld op) tonen we beide opstellingen.
+  const inWalkout = snap?.phase === "walkout";
 
   useEffect(() => {
     if (!snap || finishedRef.current) return;
@@ -99,11 +84,9 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
 
         {phaseLabel && <div className="phase-banner">{phaseLabel}</div>}
 
-        {intro !== "done" && (
-          <IntroOverlay config={config} stage={intro} onSkip={() => setIntro("done")} />
-        )}
+        {inWalkout && <LineupsOverlay config={config} />}
 
-        {intro === "done" && snap && showBoard(snap) && (
+        {!inWalkout && snap && showBoard(snap) && (
           <RestartBoard config={config} snap={snap} />
         )}
 
@@ -186,41 +169,93 @@ function formatClock(minute: number): string {
   return `${Math.min(minute, RULES.matchMinutes)}'`;
 }
 
-/** Opkomst-intro: opstelling van één ploeg, links (thuis) of rechts (uit). */
-function IntroOverlay({
-  config,
-  stage,
-  onSkip,
-}: {
-  config: MatchConfig;
-  stage: IntroStage;
-  onSkip: () => void;
-}) {
-  const team = stage === "home" ? config.home : config.away;
-  const side = stage === "home" ? "left" : "right";
+type LineupTeam = MatchConfig["home"];
+
+/** Opkomst: beide opstellingen links (thuis) en rechts (uit) + formatie-diagram. */
+function LineupsOverlay({ config }: { config: MatchConfig }) {
   return (
-    <div className={`intro-overlay intro-${side}`} onClick={onSkip}>
-      <div className="intro-card">
-        <div className="intro-team">
-          <span className="intro-chip" style={{ background: team.colorPrimary }} />
-          <span className="intro-name">{team.name}</span>
-        </div>
-        <ul className="intro-list">
-          {team.players.map((p) => (
-            <li key={p.id}>
-              <span className="intro-num" style={{ background: team.colorPrimary, color: team.colorSecondary }}>
-                {p.shirtNumber}
-              </span>
-              <span className="intro-pos">{p.position}</span>
-              <span className="intro-pname">
-                {p.firstName[0]}. {p.lastName}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
+    <div className="lineups-overlay">
+      <TeamLineup team={config.home} align="left" />
+      <TeamLineup team={config.away} align="right" />
     </div>
   );
+}
+
+function TeamLineup({ team, align }: { team: LineupTeam; align: "left" | "right" }) {
+  return (
+    <div className={`lineup-card lineup-${align}`}>
+      <div className="intro-team">
+        <span className="intro-chip" style={{ background: team.colorPrimary }} />
+        <span className="intro-name">{team.name}</span>
+      </div>
+      <FormationPitch team={team} />
+      <ul className="intro-list">
+        {team.players.map((p) => (
+          <li key={p.id}>
+            <span className="intro-num" style={{ background: team.colorPrimary, color: team.colorSecondary }}>
+              {p.shirtNumber}
+            </span>
+            <span className="intro-pos">{p.position}</span>
+            <span className="intro-pname">
+              {p.firstName[0]}. {p.lastName}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Mini-veld met de spelers op hun formatieplek (rugnummers). */
+function FormationPitch({ team }: { team: LineupTeam }) {
+  const spots = layoutFormation(team.players);
+  return (
+    <svg className="formation-pitch" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid meet">
+      <rect x="1" y="1" width="98" height="138" rx="3" className="fp-bg" />
+      <line x1="1" y1="70" x2="99" y2="70" className="fp-line" />
+      <circle cx="50" cy="70" r="11" className="fp-line" fill="none" />
+      {spots.map((s) => (
+        <g key={s.num} transform={`translate(${s.x} ${s.y})`}>
+          <circle r="6.5" style={{ fill: team.colorPrimary }} />
+          <text className="fp-num" style={{ fill: team.colorSecondary }} textAnchor="middle" dominantBaseline="central">
+            {s.num}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/** Plaats spelers op een verticaal mini-veld (GK onder, aanval boven). */
+function layoutFormation(players: LineupTeam["players"]): { num: number; x: number; y: number }[] {
+  const lineOf = (pos: string): number =>
+    pos === "GK" ? 0 : "RB LB CB".includes(pos) ? 1 : pos === "DM" ? 2 : pos === "AM" ? 3 : "RW LW ST".includes(pos) ? 4 : 2.6;
+  const xHint = (pos: string): number =>
+    pos === "RB" || pos === "RW" ? 1 : pos === "LB" || pos === "LW" ? -1 : 0;
+  const yForLine = [122, 100, 80, 55, 28];
+  const yAt = (line: number): number => {
+    const lo = yForLine[Math.floor(line)] ?? 70;
+    const hi = yForLine[Math.ceil(line)] ?? lo;
+    return lo + (hi - lo) * (line - Math.floor(line));
+  };
+
+  const byLine = new Map<number, LineupTeam["players"]>();
+  for (const p of players) {
+    const ln = lineOf(p.position);
+    const arr = byLine.get(ln) ?? [];
+    arr.push(p);
+    byLine.set(ln, arr);
+  }
+  const out: { num: number; x: number; y: number }[] = [];
+  for (const [ln, group] of byLine) {
+    const sorted = [...group].sort((a, b) => xHint(a.position) - xHint(b.position) || a.shirtNumber - b.shirtNumber);
+    const n = sorted.length;
+    sorted.forEach((p, i) => {
+      const x = n === 1 ? 50 : 18 + (64 * i) / (n - 1);
+      out.push({ num: p.shirtNumber, x, y: yAt(ln) });
+    });
+  }
+  return out;
 }
 
 /** Toon het grote scorebord bij doelpunt, rust, einde en hervattings-aftrap. */

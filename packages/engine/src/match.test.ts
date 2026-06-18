@@ -64,6 +64,15 @@ function makeConfig(seed: number): MatchConfig {
   };
 }
 
+/** Sla de opkomst-fase over zodat de aftrap-staat actief is. */
+function skipWalkout(sim: MatchSim): void {
+  let g = 0;
+  while (sim.snapshot().phase === "walkout" && g < 1000) {
+    sim.step(TICK_DT, emptyIntent());
+    g++;
+  }
+}
+
 describe("MatchSim", () => {
   it("bouwt 22 spelers met ankers binnen het veld", () => {
     const sim = new MatchSim(makeConfig(1));
@@ -76,6 +85,7 @@ describe("MatchSim", () => {
 
   it("zet bij de aftrap alle veldspelers op de eigen helft", () => {
     const sim = new MatchSim(makeConfig(5));
+    skipWalkout(sim);
     const snap = sim.snapshot();
     expect(snap.phase).toBe("kickoff");
     const half = 52.5;
@@ -88,6 +98,7 @@ describe("MatchSim", () => {
 
   it("aftrap: match staat stil en tegenstanders blijven van de bal", () => {
     const sim = new MatchSim(makeConfig(3));
+    skipWalkout(sim);
     // 0.5s < verplichte stilstand (1.6s): nog steeds aftrap, niemand heeft getrapt.
     for (let i = 0; i < 30; i++) sim.step(TICK_DT, emptyIntent());
     const s = sim.snapshot();

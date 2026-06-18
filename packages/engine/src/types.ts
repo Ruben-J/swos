@@ -82,6 +82,7 @@ export interface BallState {
 }
 
 export type MatchPhase =
+  | "walkout"
   | "kickoff"
   | "play"
   | "goal"
