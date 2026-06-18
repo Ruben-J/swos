@@ -956,8 +956,14 @@ export class MatchSim {
 
     const lineX = goalX + sign * 1.3;
     const t = (lineX - this.ball.pos.x) / vx;
-    if (t < 0.02 || t > 1.0) return; // te laat of nog te ver weg
-    const crossY = this.ball.pos.y + this.ball.vel.y * t;
+    // Reactietijd: de keeper "leest" het schot pas als het dichtbij genoeg is —
+    // hij kan niet een seconde van tevoren al naar de hoek vertrekken. Daardoor
+    // halen harde, in de hoek geplaatste schoten het net wél.
+    if (t < 0.02 || t > 0.5) return;
+    // Voorspelfout: de keeper schat het kruispunt niet perfect (groter bij een
+    // sneller schot). Zo glipt een goed geplaatst schot er soms langs.
+    const predErr = this.rng.gaussian(0, 0.25 + speed * 0.012);
+    const crossY = this.ball.pos.y + this.ball.vel.y * t + predErr;
     // Mist het doel sowieso? Dan niet duiken.
     const top = PITCH.height / 2 - PITCH.goalWidth / 2 - 1.5;
     const bot = PITCH.height / 2 + PITCH.goalWidth / 2 + 1.5;
@@ -968,8 +974,9 @@ export class MatchSim {
     const gap = Math.hypot(gapX, gapY);
     if (gap < 0.5) return; // staat al goed, gewoon blijven staan
     const dir = { x: gapX / gap, y: gapY / gap };
-    // Duiksnelheid begrensd door keeperskwaliteit: betere keeper reikt verder.
-    const diveSpeed = 11 + (p.stats.goalkeeping / 100) * 6; // 11..17 u/s
+    // Duiksnelheid begrensd door keeperskwaliteit. Bewust niet hoog: de keeper
+    // kan niet de hele goal afdekken, dus de hoeken blijven kwetsbaar.
+    const diveSpeed = 7 + (p.stats.goalkeeping / 100) * 4; // 7..11 u/s
     const need = gap / Math.max(0.08, t);
     const v = Math.min(diveSpeed, need);
     p.vel.x = dir.x * v;
