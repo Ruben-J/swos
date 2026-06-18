@@ -36,6 +36,7 @@ function makeStats(rng: Rng, position: Position, quality: number): MatchPlayerSt
     goalkeeping: isGk ? Math.round(Math.max(40, Math.min(95, rng.gaussian(base + 5, 8)))) : 20,
     composure: g(),
     stamina: g(10),
+    control: isAtt || position === "AM" || position === "CM" ? g(10) + 4 : g(),
   };
 }
 

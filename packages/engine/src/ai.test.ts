@@ -14,6 +14,7 @@ const STATS: MatchPlayerStats = {
   goalkeeping: 30,
   composure: 60,
   stamina: 60,
+  control: 60,
 };
 
 function pl(id: string, side: Side, x: number, y: number, position: Position = "CM"): PlayerEntity {

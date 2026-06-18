@@ -198,6 +198,7 @@ function toMatchStats(p: Player): MatchPlayerStats {
     goalkeeping: a.goalkeeping ?? 18,
     composure: a.composure,
     stamina: a.stamina,
+    control: a.ballControl,
   };
 }
 

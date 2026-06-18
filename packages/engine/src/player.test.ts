@@ -13,6 +13,7 @@ const STATS: MatchPlayerStats = {
   goalkeeping: 30,
   composure: 60,
   stamina: 60,
+  control: 60,
 };
 
 function mk(): PlayerEntity {

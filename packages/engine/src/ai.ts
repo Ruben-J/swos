@@ -175,6 +175,8 @@ export interface TeamAiPlan {
  *  de linie nooit op/achter de keeper komt; cap rond de middenlijn. */
 const DEF_LINE_HARD_MIN = 6;
 const DEF_LINE_PUSH_MAX = 46;
+/** Maximale lijnhoogte bij echt verdedigen: een midblok, niet tot de middenlijn. */
+const DEF_LINE_DEFEND_CAP = 34;
 /** In balbezit duwt de hele linie op (compact blok): de achterhoede zakt niet
  *  terug op een terugspeelbal, maar schuift mee naar voren zodat de ploeg kort
  *  blijft en de spitsen niet alleen voorin achterblijven. */
@@ -235,10 +237,15 @@ export function computeTeamPlan(
   // In balbezit (ook bij een terugspeelbal, phase ~0.7+) houdt de linie een hoge
   // ondergrens aan: ze loopt mee naar voren i.p.v. terug te zakken op de keeper.
   const possessionFloor = phase >= 0.7 ? DEF_LINE_POSSESSION_PUSH : 0;
+  // Bij echt verdedigen (tegenstander in bezit) houdt de linie een MIDBLOK aan
+  // i.p.v. door te schuiven tot de middenlijn: zo zit de ploeg niet met z'n allen
+  // op de helft van de tegenstander als hun keeper de bal heeft / een doeltrap
+  // neemt, en houden de verdedigers ruimte achter zich.
+  const pushCap = phase >= 0 ? DEF_LINE_PUSH_MAX : DEF_LINE_DEFEND_CAP;
   const lineFloor = clamp(
     Math.max(ballDist * 0.55, possessionFloor),
     DEF_LINE_HARD_MIN,
-    DEF_LINE_PUSH_MAX,
+    pushCap,
   );
   for (const p of players) {
     if (p.side !== side || p.isKeeper) continue;
@@ -432,7 +439,15 @@ export function computeAiCommand(
           y: ball.pos.y + toGoal.y * 3 + perp.y * side * 3.2,
         };
       } else {
-        aim = { ...ball.pos };
+        // Doel-zijde: niet recht op de bal duiken (dan draait hij er zo omheen),
+        // maar JOCKEYEN — net tussen bal en doel blijven om de weg naar het doel
+        // af te schermen. Pas bij echt dichtbij grijp je in.
+        const close = dist(player.pos, ball.pos);
+        const standoff = close < 2.2 ? 0.4 : 1.3;
+        aim = {
+          x: ball.pos.x + toGoal.x * standoff,
+          y: ball.pos.y + toGoal.y * standoff,
+        };
       }
     } else {
       aim = len(ball.vel) > 4 ? predictIntercept(ball, player.pos, speed) : { ...ball.pos };
@@ -632,16 +647,21 @@ function keeperCommand(
     return cmd;
   }
 
-  // Standaard: vlak voor de doellijn, sterk gecentreerd. De keeper schuift maar
-  // een beetje met de bal mee in de breedte (niet naar de paal) en komt
-  // nauwelijks uit — zo staat hij zelden "perfect", waardoor een strak schot in
-  // de hoek er nog langs kan.
+  // Standaard: hoek afdekken op de lijn bal->doelmidden. Hoe DICHTERBIJ de bal,
+  // hoe minder de keeper uitkomt (hij blijft op/voor de lijn) en hoe sterker hij
+  // naar de balzijde schuift om de KORTE HOEK af te dekken. Bal ver weg -> komt
+  // hij wat verder uit om de hoek te verkleinen, en blijft hij centraler.
   const gc = { x: ownGoal.x, y: PITCH.height / 2 };
+  const ballDist = dist(ball.pos, gc);
   const toBall = normalize({ x: ball.pos.x - gc.x, y: ball.pos.y - gc.y });
-  const outDist = 2.6; // beperkt uitkomen om de hoek wat af te dekken
+  // Uitkomen schaalt met afstand: dichtbij ~0.8 (op de lijn), ver tot ~4.
+  const outDist = clamp(ballDist * 0.16, 0.8, 4);
+  // Korte-hoekdekking: dichtbij volgt de keeper de bal-y veel sterker.
+  const nearPost = clamp(1 - ballDist / 24, 0.18, 0.62);
+  const postLimit = PITCH.goalWidth / 2 - 0.3;
   const target: Vec2 = {
     x: gc.x + toBall.x * outDist,
-    y: clamp(gc.y + toBall.y * outDist * 0.5, PITCH.height / 2 - 4, PITCH.height / 2 + 4),
+    y: clamp(gc.y + (ball.pos.y - gc.y) * nearPost, PITCH.height / 2 - postLimit, PITCH.height / 2 + postLimit),
   };
   moveTo(cmd, gk, target, len({ x: target.x - gk.pos.x, y: target.y - gk.pos.y }) > 2.5);
   return cmd;

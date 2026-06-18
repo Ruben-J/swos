@@ -17,6 +17,8 @@ export interface MatchPlayerStats {
   goalkeeping: number;
   composure: number;
   stamina: number;
+  /** Balcontrole/dribbel: hoe strak de bal aan de voet blijft bij draaien. */
+  control: number;
 }
 
 export type PlayerActState =

@@ -36,6 +36,7 @@ function makePlayers(prefix: string): MatchPlayerSetup[] {
       goalkeeping: position === "GK" ? 65 : 30,
       composure: 60,
       stamina: 70,
+      control: 60,
     },
   }));
 }
@@ -266,8 +267,10 @@ describe("MatchSim", () => {
     H.pos = { x: 50, y: 34 };
     H.tackleCooldown = 0;
     A.pos = { x: 51, y: 34 };
-    // Bal ~2 van H (buiten tackle-bereik) maar A vlak naast H.
-    sim.ball.pos = { x: 52, y: 34 };
+    // Bal buiten tackle-bereik van H maar A's lijf vlak naast H (mistimede tackle
+    // = overtreding). Iets ruimer dan de tackle-range zodat de dribbel-carry de
+    // bal niet net binnen bereik trekt.
+    sim.ball.pos = { x: 53, y: 34 };
     sim.ball.vel = { x: 0, y: 0 };
     sim.ball.z = 0;
     sim.ball.ownerId = A.id;

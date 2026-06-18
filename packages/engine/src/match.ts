@@ -614,17 +614,37 @@ export class MatchSim {
       p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
     }
 
-    // Bal dragen: licht voor de speler uit "kleven".
+    // Bal dragen: licht voor de speler uit "kleven". Balcontrole bepaalt hoe
+    // strak: lage controle = bal verder voor de voeten + lossere touch, en bij
+    // een scherpe draai kan de bal losschieten (de speler verspeelt 'm).
     if (this.ball.ownerId === p.id && this.ball.sinceKick > 0.12) {
-      const ahead = 0.9;
+      const ctrl = p.stats.control / 100; // 0..1
+      const ahead = 0.7 + (1 - ctrl) * 0.7; // 0.7..1.4 u voor de voeten
+      const stick = 8 + ctrl * 10; // 8..18 catch-up: hoog = strak aan de voet
       const fx = Math.cos(p.facing);
       const fy = Math.sin(p.facing);
       const targetX = p.pos.x + fx * ahead;
       const targetY = p.pos.y + fy * ahead;
-      this.ball.pos.x += (targetX - this.ball.pos.x) * Math.min(1, dt * 12);
-      this.ball.pos.y += (targetY - this.ball.pos.y) * Math.min(1, dt * 12);
-      this.ball.vel.x = p.vel.x;
-      this.ball.vel.y = p.vel.y;
+      this.ball.pos.x += (targetX - this.ball.pos.x) * Math.min(1, dt * stick);
+      this.ball.pos.y += (targetY - this.ball.pos.y) * Math.min(1, dt * stick);
+
+      // Te ver achtergebleven (scherpe draai/versnelling) bij beperkte controle ->
+      // de bal raakt los: ownership vrij, hij rolt door in de looprichting.
+      const offDist = dist(this.ball.pos, p.pos);
+      const looseLimit = ahead + 0.7 + ctrl * 0.7;
+      const speed = len(p.vel);
+      if (offDist > looseLimit && speed > 5) {
+        this.ball.ownerId = null;
+        this.ballProtectedFor = null;
+        this.ball.sinceKick = 0; // voorkomt instant terugpakken
+        this.ball.lastTouchSide = p.side;
+        this.ball.lastTouchId = p.id;
+        this.ball.vel.x = (this.ball.pos.x - p.pos.x) / Math.max(0.1, offDist) * speed * 0.9;
+        this.ball.vel.y = (this.ball.pos.y - p.pos.y) / Math.max(0.1, offDist) * speed * 0.9;
+      } else {
+        this.ball.vel.x = p.vel.x;
+        this.ball.vel.y = p.vel.y;
+      }
       this.ball.z = 0;
       this.ball.vz = 0;
     }
