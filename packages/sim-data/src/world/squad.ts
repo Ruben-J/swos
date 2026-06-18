@@ -1,5 +1,15 @@
 import { Rng, clamp, rngId, type Player, type Position, type Team } from "@pitch/shared";
-import type { MatchPlayerSetup, MatchPlayerStats, TeamSetup } from "@pitch/engine";
+import { FORMATIONS, type MatchPlayerSetup, type MatchPlayerStats, type TeamSetup } from "@pitch/engine";
+
+/** Verdeling van formaties over de clubs (deterministisch op team-id). */
+const FORMATION_POOL = ["4-4-2", "4-4-2", "4-3-3", "4-3-3", "4-3-3", "3-5-2", "3-4-3", "4-5-1"];
+
+/** Kies een vaste formatie voor een club (zelfde id -> zelfde formatie). */
+export function teamFormationName(teamId: string): string {
+  let h = 0;
+  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) >>> 0;
+  return FORMATION_POOL[h % FORMATION_POOL.length]!;
+}
 
 const HAIR_COLORS = ["#1b1b1b", "#2e2018", "#5a3a1e", "#8a5a2b", "#c8943f", "#d9c27a", "#a23b1e", "#9a9a9a"];
 const SKIN_TONES = ["#f1c9a5", "#e6b48c", "#d49a6a", "#a9714b", "#8a5a3a", "#6b4327"];
@@ -202,10 +212,10 @@ function toMatchStats(p: Player): MatchPlayerStats {
   };
 }
 
-const FORMATION_4412: Position[] = ["GK", "RB", "CB", "CB", "LB", "RW", "CM", "CM", "LW", "ST", "ST"];
-
-/** Kies de beste XI in een 4-4-2 en bouw een engine-TeamSetup voor live spel. */
+/** Kies de beste XI in de teamformatie en bouw een engine-TeamSetup voor live spel. */
 export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
+  const formationName = teamFormationName(team.id);
+  const formation = (FORMATIONS[formationName] ?? FORMATIONS["4-4-2"]!) as Position[];
   const pool = [...players].sort((a, b) => playerOverall(b) - playerOverall(a));
   const used = new Set<string>();
   const positionFit = (p: Player, slot: Position): number => {
@@ -216,7 +226,7 @@ export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
     return group(pref) === group(slot) ? 1 : 2;
   };
   const chosen: { player: Player; slot: Position }[] = [];
-  for (const slot of FORMATION_4412) {
+  for (const slot of formation) {
     let best: Player | null = null;
     let bestScore = Infinity;
     for (const p of pool) {
@@ -254,7 +264,7 @@ export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
     colorPrimary: team.colors.primary,
     colorSecondary: team.colors.secondary,
     players: setupPlayers,
-    formationName: "4-4-2",
+    formationName,
     tactics: {
       lineHeight: clamp(team.tacticalIdentity.press, 0.35, 0.7),
       press: clamp(team.tacticalIdentity.press, 0.4, 0.85),

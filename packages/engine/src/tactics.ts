@@ -83,6 +83,7 @@ export const FORMATIONS: Record<string, Position[]> = {
   "4-3-3": ["GK", "RB", "CB", "CB", "LB", "DM", "CM", "CM", "RW", "ST", "LW"],
   "4-5-1": ["GK", "RB", "CB", "CB", "LB", "RW", "CM", "DM", "CM", "LW", "ST"],
   "3-5-2": ["GK", "CB", "CB", "CB", "RW", "DM", "CM", "CM", "LW", "ST", "ST"],
+  "3-4-3": ["GK", "CB", "CB", "CB", "RB", "CM", "CM", "LB", "RW", "ST", "LW"],
 };
 
 /**

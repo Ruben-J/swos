@@ -447,8 +447,13 @@ export class MatchSim {
       return;
     }
 
-    // Aftertouch voor de menselijke speler tijdens het venster na zijn trap.
-    if (this.humanSide && this.ball.lastTouchSide === this.humanSide) {
+    // Aftertouch (effect/lob) alleen na een SCHOT van de mens — niet na een pass.
+    // Een pass heeft een doel-ontvanger (targetId); dan geen effect toepassen.
+    if (
+      this.humanSide &&
+      this.ball.lastTouchSide === this.humanSide &&
+      this.ball.targetId === null
+    ) {
       const steer = len(humanIntent.aftertouch) > 0.01 ? humanIntent.aftertouch : humanIntent.move;
       applyAftertouch(this.ball, steer);
     }
@@ -1540,6 +1545,17 @@ export class MatchSim {
         m.set(p.id, { x: backX, y: clamp(cy + (i % 2 === 0 ? -10 : 10), 6, PITCH.height - 6) });
       }
     });
+
+    // Keeper gaat bij een gevaarlijke vrije trap netjes OP de doellijn staan,
+    // iets naar de balzijde om de hoek af te dekken (niet uitkomen).
+    const gk = this.players.find((p) => p.side === defendingSide && p.isKeeper);
+    if (gk) {
+      const postLimit = PITCH.goalWidth / 2 - 0.4;
+      m.set(gk.id, {
+        x: gx + sign * 0.6,
+        y: clamp(cy + (spot.y - cy) * 0.35, cy - postLimit, cy + postLimit),
+      });
+    }
 
     return m;
   }
