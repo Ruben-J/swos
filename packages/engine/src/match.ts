@@ -92,6 +92,15 @@ export interface MatchSnapshot {
   awaitingHumanRestart: boolean;
   /** Richt-pijltje (rad) voor een mikbare hervatting van de mens, of null. */
   restartAim: number | null;
+  /** Doelpunten in volgorde, met maker en minuut (voor de scorebord-overlay). */
+  goals: GoalEvent[];
+}
+
+export interface GoalEvent {
+  side: Side;
+  scorer: string;
+  minute: number;
+  ownGoal: boolean;
 }
 
 export class MatchSim {
@@ -111,6 +120,7 @@ export class MatchSim {
   }
   private kickoffSide: Side = "home";
   private lastConcededSide: Side | null = null;
+  private goals: GoalEvent[] = [];
 
   private humanSide: Side | null;
   activeId: Record<Side, string | null> = { home: null, away: null };
@@ -1164,6 +1174,16 @@ export class MatchSim {
     this.phase = "goal";
     this.phaseTimer = 1.8;
     this.lastConcededSide = otherSide(scoringSide);
+    // Maker = laatste aanraking; zit die bij de tegenpartij -> eigen doelpunt.
+    const toucher = this.byId(this.ball.lastTouchId);
+    const ownGoal = !!toucher && toucher.side !== scoringSide;
+    const scorer = toucher ? `${toucher.firstName[0]}. ${toucher.lastName}` : "?";
+    this.goals.push({
+      side: scoringSide,
+      scorer,
+      minute: Math.max(1, Math.min(RULES.matchMinutes, Math.ceil(this.matchMinute()))),
+      ownGoal,
+    });
     // Bal houdt z'n vaart -> rolt door in het doel (niet op de lijn blijven).
     this.ball.ownerId = null;
     this.ballProtectedFor = null;
@@ -1681,6 +1701,7 @@ export class MatchSim {
         this.restartAim !== null
           ? this.restartAim
           : null,
+      goals: this.goals.map((g) => ({ ...g })),
     };
   }
 }

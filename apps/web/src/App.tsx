@@ -6,11 +6,12 @@ import { MainMenu } from "./screens/MainMenu.js";
 import { MatchScreen } from "./screens/MatchScreen.js";
 import { CareerSetup } from "./career/CareerSetup.js";
 import { CareerLoad } from "./career/CareerLoad.js";
+import { QuickMatchSetup } from "./career/QuickMatchSetup.js";
 import { CareerHub } from "./screens/CareerHub.js";
 import { buildMatchConfig } from "./career/careerMatch.js";
 import { putSave } from "./storage/saves.js";
 
-type Screen = "menu" | "match" | "careerSetup" | "careerLoad" | "careerHub";
+type Screen = "menu" | "match" | "quickSetup" | "careerSetup" | "careerLoad" | "careerHub";
 
 export function App() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -19,10 +20,8 @@ export function App() {
   // De career-wedstrijd die live gespeeld wordt (voor toepassen eindstand).
   const [careerMatch, setCareerMatch] = useState<Match | null>(null);
 
-  const startQuickMatch = useCallback(() => {
-    const seed = (Math.floor(Math.random() * 0xffffffff) >>> 0).toString();
-    const { seed: numSeed, home, away } = quickMatchSetup(seed);
-    setConfig({ seed: numSeed, home, away, humanSide: "home" });
+  const startQuickConfig = useCallback((cfg: MatchConfig) => {
+    setConfig(cfg);
     setCareerMatch(null);
     setScreen("match");
   }, []);
@@ -98,6 +97,10 @@ export function App() {
     );
   }
 
+  if (screen === "quickSetup") {
+    return <QuickMatchSetup onStart={startQuickConfig} onCancel={() => setScreen("menu")} />;
+  }
+
   if (screen === "careerSetup") {
     return <CareerSetup onStart={startCareer} onCancel={() => setScreen("menu")} />;
   }
@@ -128,7 +131,7 @@ export function App() {
 
   return (
     <MainMenu
-      onQuickMatch={startQuickMatch}
+      onQuickMatch={() => setScreen("quickSetup")}
       onLocalVersus={startLocalVersus}
       onCareer={() => setScreen("careerSetup")}
       onLoadCareer={() => setScreen("careerLoad")}

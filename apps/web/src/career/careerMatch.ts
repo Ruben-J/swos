@@ -1,6 +1,19 @@
 import type { MatchConfig } from "@pitch/engine";
 import { hashSeed, type CareerSave, type Match, type Player, type UUID } from "@pitch/shared";
-import { toTeamSetup } from "@pitch/sim-data";
+import { toTeamSetup, type World } from "@pitch/sim-data";
+
+/** Snelle-match-config uit twee wereldteams (career-clubs), mens bestuurt thuis. */
+export function worldMatchConfig(world: World, homeId: UUID, awayId: UUID, seed: number): MatchConfig {
+  const home = world.teams.find((t) => t.id === homeId)!;
+  const away = world.teams.find((t) => t.id === awayId)!;
+  const playersOf = (id: UUID): Player[] => world.players.filter((p) => p.teamId === id);
+  return {
+    seed,
+    home: toTeamSetup(home, playersOf(homeId)),
+    away: toTeamSetup(away, playersOf(awayId)),
+    humanSide: "home",
+  };
+}
 
 export function playersOfTeam(save: CareerSave, teamId: UUID): Player[] {
   return save.worldState.players.filter((p) => p.teamId === teamId);
