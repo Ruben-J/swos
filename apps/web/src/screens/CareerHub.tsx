@@ -107,10 +107,11 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
                   <th className="ch-tn">Naam</th>
                   <th>Pos</th>
                   <th>Lft</th>
-                  <th>Pac</th>
-                  <th>Sho</th>
-                  <th>Pas</th>
-                  <th>Tac</th>
+                  {ATTR_COLS.map((c) => (
+                    <th key={c.key} title={c.full}>
+                      {c.label}
+                    </th>
+                  ))}
                   <th>OVR</th>
                 </tr>
               </thead>
@@ -235,9 +236,25 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   );
 }
 
+// Alle spelerseigenschappen (afkorting + volledige naam voor de tooltip).
+const ATTR_COLS: { key: keyof Player["attributes"]; label: string; full: string }[] = [
+  { key: "pace", label: "Pac", full: "Snelheid" },
+  { key: "stamina", label: "Sta", full: "Conditie" },
+  { key: "ballControl", label: "Ctl", full: "Balcontrole" },
+  { key: "passing", label: "Pas", full: "Passing" },
+  { key: "shooting", label: "Sho", full: "Schot" },
+  { key: "finishing", label: "Fin", full: "Afwerking" },
+  { key: "heading", label: "Kop", full: "Koppen" },
+  { key: "tackling", label: "Tac", full: "Tackelen" },
+  { key: "composure", label: "Rust", full: "Beheersing" },
+  { key: "aggression", label: "Agr", full: "Agressie" },
+  { key: "consistency", label: "Cst", full: "Constantheid" },
+  { key: "flair", label: "Fla", full: "Flair" },
+  { key: "goalkeeping", label: "Kpr", full: "Keepen" },
+];
+
 function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
   const a = p.attributes;
-  const isGk = (p.preferredPositions[0] ?? "CM") === "GK";
   return (
     <tr>
       <td>{num}</td>
@@ -246,10 +263,10 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
       </td>
       <td>{p.preferredPositions[0]}</td>
       <td>{p.ageYears}</td>
-      <td>{a.pace}</td>
-      <td>{isGk ? (a.goalkeeping ?? "-") : a.shooting}</td>
-      <td>{a.passing}</td>
-      <td>{a.tackling}</td>
+      {ATTR_COLS.map((c) => {
+        const v = a[c.key];
+        return <td key={c.key}>{typeof v === "number" ? v : "-"}</td>;
+      })}
       <td className="ch-pts">{ovr}</td>
     </tr>
   );
