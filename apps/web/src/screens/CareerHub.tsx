@@ -1,12 +1,20 @@
 import { useMemo, useState } from "react";
 import { Rng, hashSeed, type CareerSave, type Match, type Player, type UUID } from "@pitch/shared";
 import {
+  askingPrice,
+  buyPlayer,
+  canBuy,
   divisionStandings,
   formatShort,
   playMatchday,
   playerOverall,
   seasonComplete,
+  sellPlayer,
+  squadSize,
   teamNextMatch,
+  transferTargets,
+  transferWindowOpen,
+  weeklyWageBill,
 } from "@pitch/sim-data";
 
 interface Props {
@@ -24,7 +32,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const myDivision = ws.divisions.find((d) => d.id === myTeam.divisionId)!;
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
-  const [tab, setTab] = useState<"overzicht" | "selectie">("overzicht");
+  const [tab, setTab] = useState<"overzicht" | "selectie" | "transfers">("overzicht");
 
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
   const standings = useMemo(() => divisionStandings(save, myTeam.divisionId), [save, myTeam.divisionId]);
@@ -88,6 +96,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
             >
               Selectie
             </button>
+            <button
+              className={`ch-tab${tab === "transfers" ? " sel" : ""}`}
+              onClick={() => setTab("transfers")}
+            >
+              Transfers
+            </button>
           </div>
           <div className="ch-date">{formatShort(season.currentDate)}</div>
           <button className="btn" onClick={onExit}>
@@ -125,7 +139,9 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
         </div>
       )}
 
-      <div className="ch-body" style={tab === "selectie" ? { display: "none" } : undefined}>
+      {tab === "transfers" && <TransfersView save={save} onUpdate={onUpdate} />}
+
+      <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
         <section className="ch-panel ch-next">
           <h2>Volgende wedstrijd</h2>
           {nextMatch ? (
@@ -269,5 +285,112 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
       })}
       <td className="ch-pts">{ovr}</td>
     </tr>
+  );
+}
+
+/** Korte geldnotatie: €12,3 mln / €450 k. */
+function money(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return `€${(n / 1_000_000).toFixed(1)} mln`;
+  if (Math.abs(n) >= 1_000) return `€${Math.round(n / 1_000)} k`;
+  return `€${Math.round(n)}`;
+}
+
+const POSITIONS = ["GK", "RB", "LB", "CB", "DM", "CM", "AM", "RW", "LW", "ST"];
+
+function TransfersView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: CareerSave) => void }) {
+  const ws = save.worldState;
+  const myId = save.manager.currentTeamId;
+  const myTeam = ws.teams.find((t) => t.id === myId)!;
+  const [posFilter, setPosFilter] = useState<string>("");
+  const windowOpen = transferWindowOpen(save);
+
+  const clubName = (id: UUID | null): string =>
+    id ? (ws.teams.find((t) => t.id === id)?.name ?? "?") : "vrij";
+
+  const market = useMemo(
+    () => transferTargets(save, { position: posFilter || undefined, limit: 40 }),
+    [save, posFilter],
+  );
+  const mySquad = useMemo(
+    () =>
+      ws.players
+        .filter((p) => p.teamId === myId)
+        .map((p) => ({ p, ovr: playerOverall(p) }))
+        .sort((a, b) => b.ovr - a.ovr),
+    [ws.players, myId],
+  );
+
+  const buy = (id: UUID) => {
+    const s = structuredClone(save);
+    if (buyPlayer(s, id).ok) onUpdate(s);
+  };
+  const sell = (id: UUID) => {
+    const s = structuredClone(save);
+    if (sellPlayer(s, id).ok) onUpdate(s);
+  };
+
+  return (
+    <div className="ch-body ch-transfers">
+      <section className="ch-panel ch-fin">
+        <h2>Financiën</h2>
+        <div className="fin-grid">
+          <div><span>Saldo</span><strong>{money(myTeam.finances.balance)}</strong></div>
+          <div><span>Transferbudget</span><strong>{money(myTeam.finances.transferBudget)}</strong></div>
+          <div><span>Loon/week</span><strong>{money(weeklyWageBill(save, myId))}</strong></div>
+          <div><span>Selectie</span><strong>{squadSize(save, myId)}</strong></div>
+        </div>
+        <div className={`fin-window${windowOpen ? " open" : ""}`}>
+          Transferperiode {windowOpen ? "open" : "gesloten"}
+        </div>
+
+        <h3 className="ch-recent-title">Mijn selectie — verkopen</h3>
+        <ul className="tr-sell">
+          {mySquad.map(({ p, ovr }) => (
+            <li key={p.id}>
+              <span className="tr-pos">{p.preferredPositions[0]}</span>
+              <span className="tr-name">{p.firstName[0]}. {p.lastName}</span>
+              <span className="tr-ovr">{ovr}</span>
+              <span className="tr-val">{money(p.market.estimatedValue)}</span>
+              <button
+                className="btn tr-btn"
+                disabled={!windowOpen || squadSize(save, myId) <= 14}
+                onClick={() => sell(p.id)}
+              >
+                Verkoop
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="ch-panel ch-market">
+        <div className="market-head">
+          <h2>Transfermarkt</h2>
+          <select className="cs-input tr-filter" value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
+            <option value="">Alle posities</option>
+            {POSITIONS.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
+        <ul className="tr-market">
+          {market.map((p) => {
+            const can = canBuy(save, p.id);
+            return (
+              <li key={p.id}>
+                <span className="tr-pos">{p.preferredPositions[0]}</span>
+                <span className="tr-name">{p.firstName[0]}. {p.lastName}</span>
+                <span className="tr-club">{clubName(p.teamId)}</span>
+                <span className="tr-ovr">{playerOverall(p)}</span>
+                <span className="tr-val">{money(askingPrice(p))}</span>
+                <button className="btn tr-btn" disabled={!can.ok} title={can.reason ?? ""} onClick={() => buy(p.id)}>
+                  Koop
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </div>
   );
 }

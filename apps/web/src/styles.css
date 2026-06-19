@@ -644,6 +644,97 @@ kbd {
   background: #16241c;
 }
 
+/* --- Transfers --- */
+.ch-transfers {
+  grid-template-columns: 1fr 1.3fr;
+}
+.fin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.7rem;
+}
+.fin-grid div {
+  display: flex;
+  flex-direction: column;
+}
+.fin-grid span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.fin-grid strong {
+  font-size: 1.1rem;
+  color: var(--accent-2);
+}
+.fin-window {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: #3a2326;
+  color: #e0a0a0;
+}
+.fin-window.open {
+  background: #16241c;
+  color: var(--accent);
+}
+.market-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.tr-filter {
+  max-width: 160px;
+  padding: 0.4rem 0.6rem;
+}
+.tr-sell,
+.tr-market {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tr-sell li,
+.tr-market li {
+  display: grid;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 6px;
+}
+.tr-sell li {
+  grid-template-columns: 28px 1fr 30px 70px auto;
+}
+.tr-market li {
+  grid-template-columns: 28px 1.2fr 1fr 30px 80px auto;
+}
+.tr-sell li:hover,
+.tr-market li:hover {
+  background: #16241c;
+}
+.tr-pos {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.tr-club {
+  color: var(--muted);
+}
+.tr-ovr {
+  font-weight: 700;
+  color: var(--accent-2);
+  text-align: center;
+}
+.tr-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tr-btn {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+}
+
 /* --- Quick match team picker --- */
 .qm-pickers {
   flex: 1;

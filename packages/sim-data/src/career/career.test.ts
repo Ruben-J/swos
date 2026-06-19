@@ -6,6 +6,7 @@ import { buildWorld } from "../world/build.js";
 import { createCareer } from "../world/build.js";
 import { divisionStandings, playMatchday, seasonComplete, teamNextMatch } from "./season.js";
 import { advanceToNextSeason } from "./rollover.js";
+import { buyPlayer, sellPlayer, squadSize, transferTargets, transferWindowOpen } from "./transfers.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -159,5 +160,38 @@ describe("career-seizoen", () => {
     const next1 = teamNextMatch(save.worldState.matches, myTeam.id);
     expect(next1).not.toBeNull();
     expect(divisionStandings(save, myDivNow).length).toBe(16);
+  });
+
+  it("transfers: kopen en verkopen verrekenen budget en selectie", () => {
+    const world = buildWorld(new Rng(3), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 1, managerName: "T", teamId: myTeam.id });
+    // createCareer zet de datum op 15 aug -> binnen het zomervenster (1 jul-1 sep).
+    expect(transferWindowOpen(save)).toBe(true);
+
+    const buyer = save.worldState.teams.find((t) => t.id === myTeam.id)!;
+    buyer.finances.transferBudget = 200_000_000; // ruim budget voor de test
+    const sizeBefore = squadSize(save, myTeam.id);
+    const budgetBefore = buyer.finances.transferBudget;
+
+    const target = transferTargets(save, { limit: 1 })[0]!;
+    const sellerId = target.teamId!;
+    const sellerSizeBefore = squadSize(save, sellerId);
+    const res = buyPlayer(save, target.id);
+    expect(res.ok).toBe(true);
+    expect(save.worldState.players.find((p) => p.id === target.id)!.teamId).toBe(myTeam.id);
+    expect(squadSize(save, myTeam.id)).toBe(sizeBefore + 1);
+    expect(squadSize(save, sellerId)).toBe(sellerSizeBefore - 1);
+    expect(buyer.finances.transferBudget).toBeLessThan(budgetBefore);
+    // Nieuw contract bij mijn club.
+    expect(save.worldState.contracts.find((c) => c.playerId === target.id)!.teamId).toBe(myTeam.id);
+
+    // Verkopen: selectie krimpt, budget stijgt.
+    const budgetAfterBuy = buyer.finances.transferBudget;
+    const sell = sellPlayer(save, target.id);
+    expect(sell.ok).toBe(true);
+    expect(save.worldState.players.find((p) => p.id === target.id)!.teamId).toBeNull();
+    expect(squadSize(save, myTeam.id)).toBe(sizeBefore);
+    expect(buyer.finances.transferBudget).toBeGreaterThan(budgetAfterBuy);
   });
 });
