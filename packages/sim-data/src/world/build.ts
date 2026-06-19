@@ -44,7 +44,7 @@ export function buildCupsAndEuro(
     const divIds = new Set(divisions.filter((d) => d.countryCode === code).map((d) => d.id));
     const teamIds = teams.filter((t) => divIds.has(t.divisionId)).map((t) => t.id);
     if (teamIds.length < 2) continue;
-    const ko = buildKnockout(rng, seasonId, "cup", `${cname} Beker`, code, teamIds, addDays(seasonStart, 10));
+    const ko = buildKnockout(rng, seasonId, "cup", `${cname} Beker`, code, teamIds, addDays(seasonStart, 11));
     competitions.push(ko.competition);
     matches.push(...ko.matches);
   }
@@ -58,7 +58,7 @@ export function buildCupsAndEuro(
   for (const e of euros) {
     const ids = euroRanking.slice(e.slice[0], e.slice[1]);
     if (ids.length < 2) continue;
-    const ko = buildKnockout(rng, seasonId, e.scope, e.name, null, ids, addDays(seasonStart, 17));
+    const ko = buildKnockout(rng, seasonId, e.scope, e.name, null, ids, addDays(seasonStart, 18));
     competitions.push(ko.competition);
     matches.push(...ko.matches);
   }
@@ -274,7 +274,8 @@ export function createCareer(world: World, opts: CreateCareerOptions): CareerSav
   const seedNum = typeof opts.seed === "string" ? hashSeed(opts.seed) : opts.seed;
   const rng = new Rng(seedNum ^ 0x5eed51);
   const refYear = opts.refYear ?? 2025;
-  const seasonStart = `${refYear}-08-15`;
+  // Seizoensstart op een zaterdag: league in het weekend, beker/Europa midweek.
+  const seasonStart = `${refYear}-08-16`;
 
   const seasonId = rngId(rng);
   const league = buildSeasonFixtures(rng, seasonId, world.divisions, world.teams, seasonStart);

@@ -89,7 +89,7 @@ export function advanceToNextSeason(
   // Nieuw seizoen + verse kalender.
   oldSeason.promotedRelegatedResolved = true;
   const nextYear = seasonYear(oldSeason.label) + 1;
-  const seasonStart = `${nextYear}-08-15`;
+  const seasonStart = `${nextYear}-08-16`;
   const seasonId = rngId(rng);
   const league = buildSeasonFixtures(rng, seasonId, ws.divisions, ws.teams, seasonStart);
 
