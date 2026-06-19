@@ -173,3 +173,21 @@ describe("opstappen / buitenspelval", () => {
     expect(cmd.move.x).toBeGreaterThan(0);
   });
 });
+
+describe("achterhoede sluit aan", () => {
+  it("in balbezit schuift de verdediging hoger op naarmate de bal voorin ligt", () => {
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const cb = pl("cb", "home", 20, 34, "CB");
+    const cm = pl("cm", "home", 50, 34, "CM");
+    const mk = (ballX: number) => {
+      const ball = createBall({ x: ballX, y: 34 });
+      const plan = computeTeamPlan([gk, cb, cm], ball, "home", "home");
+      return plan.targets.get("cb")!.x;
+    };
+    const back = mk(40); // bal op eigen helft/middenveld
+    const fwd = mk(82); // bal diep voorin
+    // Met de bal voorin sluit de achterhoede duidelijk verder aan.
+    expect(fwd).toBeGreaterThan(back + 10);
+    expect(fwd).toBeGreaterThan(50); // tot rond de middenlijn
+  });
+});

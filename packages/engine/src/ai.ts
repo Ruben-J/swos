@@ -183,6 +183,9 @@ const DEF_LINE_DEFEND_CAP = 34;
  *  terug op een terugspeelbal, maar schuift mee naar voren zodat de ploeg kort
  *  blijft en de spitsen niet alleen voorin achterblijven. */
 const DEF_LINE_POSSESSION_PUSH = 32;
+/** Bij de bal voorin sluit de achterhoede ver aan (tot net in de helft van de
+ *  tegenstander) zodat het blok kort blijft en er geen gat met het middenveld valt. */
+const DEF_LINE_POSSESSION_CAP = 54;
 /** Mark alleen tegenstanders rond de bal (de actieve zone van het veld). */
 const MARK_BALL_RADIUS = 38;
 /** Verdediger pakt alleen op als de man redelijk dichtbij is, anders houdt hij vorm. */
@@ -266,17 +269,24 @@ export function computeTeamPlan(
   const ballDist = side === "home" ? ball.pos.x : PITCH.width - ball.pos.x;
   // In balbezit (ook bij een terugspeelbal, phase ~0.7+) houdt de linie een hoge
   // ondergrens aan: ze loopt mee naar voren i.p.v. terug te zakken op de keeper.
-  const possessionFloor = phase >= 0.7 ? DEF_LINE_POSSESSION_PUSH : 0;
-  // Bij echt verdedigen (tegenstander in bezit) houdt de linie een MIDBLOK aan
-  // i.p.v. door te schuiven tot de middenlijn: zo zit de ploeg niet met z'n allen
-  // op de helft van de tegenstander als hun keeper de bal heeft / een doeltrap
-  // neemt, en houden de verdedigers ruimte achter zich.
-  const pushCap = phase >= 0 ? DEF_LINE_PUSH_MAX : DEF_LINE_DEFEND_CAP;
-  const lineFloor = clamp(
-    Math.max(ballDist * 0.55, possessionFloor),
-    DEF_LINE_HARD_MIN,
-    pushCap,
-  );
+  let lineFloor: number;
+  if (phase >= 0.7) {
+    // In balbezit: de achterhoede schuift stevig met de bal mee zodat ze aansluit
+    // bij het middenveld (compact blok). Ligt de bal voorin, dan komt de linie
+    // tot net in de helft van de tegenstander; ligt hij achterin, dan houdt een
+    // hoge ondergrens de ploeg kort.
+    lineFloor = clamp(
+      Math.max(ballDist * 0.72, DEF_LINE_POSSESSION_PUSH),
+      DEF_LINE_HARD_MIN,
+      DEF_LINE_POSSESSION_CAP,
+    );
+  } else {
+    // Bij echt verdedigen (tegenstander in bezit) houdt de linie een MIDBLOK aan
+    // i.p.v. door te schuiven tot de middenlijn: zo zit de ploeg niet met z'n
+    // allen op de helft van de tegenstander en houden de verdedigers ruimte achter.
+    const pushCap = phase >= 0 ? DEF_LINE_PUSH_MAX : DEF_LINE_DEFEND_CAP;
+    lineFloor = clamp(ballDist * 0.55, DEF_LINE_HARD_MIN, pushCap);
+  }
   const lineX = side === "home" ? lineFloor : PITCH.width - lineFloor;
   for (const p of players) {
     if (p.side !== side || p.isKeeper) continue;
