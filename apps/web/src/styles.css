@@ -768,6 +768,43 @@ kbd {
   font-size: 0.8rem;
 }
 
+/* --- Trainingsfocus --- */
+.ch-training {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+}
+.ch-train-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ch-train-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.ch-train-btn {
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #2c3a32;
+  background: #16211b;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.ch-train-btn:hover {
+  border-color: var(--accent);
+}
+.ch-train-btn.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0c140f;
+  font-weight: 700;
+}
+
 /* --- Competities (beker/Europa) --- */
 .ch-comps {
   grid-template-columns: 1fr 1fr;

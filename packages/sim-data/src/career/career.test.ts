@@ -10,6 +10,9 @@ import { buyPlayer, sellPlayer, squadSize, transferTargets, transferWindowOpen }
 import { isAvailable } from "./events.js";
 import { seasonObjective } from "./board.js";
 import { knockoutChampion } from "./knockout.js";
+import { processTraining } from "./training.js";
+import { processAiTransfers } from "./aitransfers.js";
+import { playerOverall } from "../world/squad.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -267,5 +270,91 @@ describe("career-seizoen", () => {
     expect(obj.targetRank).toBeGreaterThanOrEqual(1);
     expect(obj.targetRank).toBeLessThanOrEqual(16);
     expect(obj.text.length).toBeGreaterThan(0);
+  });
+});
+
+describe("training", () => {
+  it("jong talent groeit over een seizoen, oude veteraan loopt terug", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+    const mine = save.worldState.players.filter((p) => p.teamId === myTeam.id);
+
+    // Kies een jong hoog-potentieel talent en een oude veteraan in mijn club.
+    const young = mine
+      .filter((p) => p.ageYears <= 20 && p.hidden.potential > playerOverall(p) + 12)
+      .sort((a, b) => b.hidden.potential - a.hidden.potential)[0];
+    const old = mine.filter((p) => p.ageYears >= 32).sort((a, b) => b.ageYears - a.ageYears)[0];
+
+    const youngBefore = young ? playerOverall(young) : null;
+    const oldBefore = old ? playerOverall(old) : null;
+
+    const rng = new Rng(123);
+    for (let week = 0; week < 38; week++) {
+      processTraining(save, rng, myTeam.id, "balanced");
+    }
+
+    if (young && youngBefore !== null) {
+      expect(playerOverall(young)).toBeGreaterThan(youngBefore);
+    }
+    if (old && oldBefore !== null) {
+      expect(playerOverall(old)).toBeLessThanOrEqual(oldBefore);
+    }
+  });
+
+  it("attack-focus tilt aanvallende attributen sterker op dan defense-focus", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    const a = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+    const b = structuredClone(a);
+
+    const young = a.worldState.players
+      .filter((p) => p.teamId === myTeam.id && p.ageYears <= 21)
+      .sort((x, y) => y.hidden.potential - x.hidden.potential)[0]!;
+    const idx = a.worldState.players.indexOf(young);
+
+    for (let w = 0; w < 30; w++) {
+      processTraining(a, new Rng(50), myTeam.id, "attack");
+      processTraining(b, new Rng(50), myTeam.id, "defense");
+    }
+    const shotA = a.worldState.players[idx]!.attributes.shooting;
+    const shotB = b.worldState.players[idx]!.attributes.shooting;
+    expect(shotA).toBeGreaterThan(shotB);
+  });
+});
+
+describe("ai-transfers", () => {
+  it("AI-clubs handelen onderling (speler wisselt van club), eigen club niet geraakt", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+
+    const myPlayerIds = new Set(
+      save.worldState.players.filter((p) => p.teamId === myTeam.id).map((p) => p.id),
+    );
+    const before = new Map(save.worldState.players.map((p) => [p.id, p.teamId]));
+
+    // Forceer open venster (createCareer staat al in het zomervenster) en handel
+    // een paar speeldagen af.
+    expect(transferWindowOpen(save)).toBe(true);
+    let moved = 0;
+    const rng = new Rng(321);
+    for (let d = 0; d < 6; d++) moved += processAiTransfers(save, rng);
+    expect(moved).toBeGreaterThan(0);
+
+    // Eigen selectie ongemoeid.
+    for (const id of myPlayerIds) {
+      expect(save.worldState.players.find((p) => p.id === id)!.teamId).toBe(myTeam.id);
+    }
+    // Minstens één speler is van club gewisseld.
+    const changed = save.worldState.players.some((p) => before.get(p.id) !== p.teamId);
+    expect(changed).toBe(true);
+    // Elke gewisselde speler heeft precies één contract bij zijn nieuwe club.
+    for (const p of save.worldState.players) {
+      if (!p.teamId) continue;
+      const cs = save.worldState.contracts.filter((c) => c.playerId === p.id);
+      expect(cs.length).toBe(1);
+      expect(cs[0]!.teamId).toBe(p.teamId);
+    }
   });
 });

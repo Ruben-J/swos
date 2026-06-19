@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Rng, hashSeed, type CareerSave, type Match, type Player, type UUID } from "@pitch/shared";
+import { Rng, hashSeed, type CareerSave, type Match, type Player, type TrainingFocus, type UUID } from "@pitch/shared";
 import {
   askingPrice,
   buyPlayer,
@@ -19,6 +19,14 @@ import {
   transferWindowOpen,
   weeklyWageBill,
 } from "@pitch/sim-data";
+
+const TRAINING_OPTS: { id: TrainingFocus; label: string; hint: string }[] = [
+  { id: "balanced", label: "Gebalanceerd", hint: "Gelijkmatige groei over alle attributen" },
+  { id: "attack", label: "Aanval", hint: "Schot, afronding, techniek en passing" },
+  { id: "defense", label: "Verdediging", hint: "Tackelen, koppen, rust aan de bal" },
+  { id: "fitness", label: "Fysiek", hint: "Conditie en snelheid + sneller herstel" },
+  { id: "youth", label: "Jeugd", hint: "Extra groei voor spelers t/m 21 jaar" },
+];
 
 interface Props {
   save: CareerSave;
@@ -70,6 +78,13 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
     const rng = new Rng(hashSeed(`${save.id}:${nextMatch.date}`));
     const updated = playMatchday(structuredClone(save), rng, nextMatch.date, {});
     onUpdate(updated);
+  };
+
+  const focus: TrainingFocus = save.manager.trainingFocus ?? "balanced";
+  const setFocus = (f: TrainingFocus) => {
+    const s = structuredClone(save);
+    s.manager.trainingFocus = f;
+    onUpdate(s);
   };
 
   const promoCut = myDivision.tier > 1 ? myDivision.promotionSlots : 0;
@@ -163,6 +178,21 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
             <span className="ch-obj-rank">
               nu {objective.currentRank ?? "?"}e · doel ≤ {objective.targetRank}e
             </span>
+          </div>
+          <div className="ch-training">
+            <span className="ch-train-label">Training</span>
+            <div className="ch-train-opts">
+              {TRAINING_OPTS.map((o) => (
+                <button
+                  key={o.id}
+                  className={`ch-train-btn${focus === o.id ? " sel" : ""}`}
+                  title={o.hint}
+                  onClick={() => setFocus(o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
           <h2>Volgende wedstrijd</h2>
           {nextMatch ? (

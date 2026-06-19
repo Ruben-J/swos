@@ -4,6 +4,9 @@ import { quickSimulate } from "./quicksim.js";
 import { computeStandings } from "./standings.js";
 import { processMatchdayEvents } from "./events.js";
 import { processKnockouts } from "./knockout.js";
+import { processTraining } from "./training.js";
+import { processAiTransfers } from "./aitransfers.js";
+import { transferWindowOpen } from "./transfers.js";
 
 /** Bereken team-ratings (0..100) uit de spelers in de save. */
 export function buildRatings(save: CareerSave): Map<UUID, number> {
@@ -95,6 +98,12 @@ export function playMatchday(
 
   // Blessures/schorsingen verwerken na de speeldag (herstel + nieuwe).
   processMatchdayEvents(save, rng, save.manager.currentTeamId);
+
+  // Training/veroudering: hele wereld groeit/loopt terug, eigen club met focus.
+  processTraining(save, rng, save.manager.currentTeamId, save.manager.trainingFocus ?? "balanced");
+
+  // AI-clubs handelen onderling als de transferperiode open is.
+  if (transferWindowOpen(save)) processAiTransfers(save, rng);
 
   // Seizoensdatum naar de eerstvolgende nog te spelen wedstrijd.
   const upcoming = save.worldState.matches

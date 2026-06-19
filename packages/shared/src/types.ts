@@ -230,6 +230,9 @@ export interface Season {
   promotedRelegatedResolved: boolean;
 }
 
+/** Wekelijkse trainingsfocus: stuurt welke attributen sneller groeien. */
+export type TrainingFocus = "balanced" | "attack" | "defense" | "fitness" | "youth";
+
 export interface CareerSave {
   id: UUID;
   profileName: string;
@@ -245,6 +248,8 @@ export interface CareerSave {
     };
     currentTeamId: UUID;
     achievements: string[];
+    /** Wekelijkse trainingsfocus van de eigen club (default "balanced"). */
+    trainingFocus?: TrainingFocus;
   };
   worldState: {
     activeSeasonId: UUID;

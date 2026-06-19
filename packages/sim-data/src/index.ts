@@ -13,3 +13,5 @@ export * from "./career/transfers.js";
 export * from "./career/events.js";
 export * from "./career/board.js";
 export * from "./career/knockout.js";
+export * from "./career/training.js";
+export * from "./career/aitransfers.js";
