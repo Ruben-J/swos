@@ -14,6 +14,7 @@ import {
   playMatchday,
   playerOverall,
   potentialStars,
+  simulateRemaining,
   seasonComplete,
   seasonObjective,
   sellPlayer,
@@ -110,6 +111,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
     const rng = new Rng(hashSeed(`${save.id}:${nextMatch.date}`));
     const updated = playMatchday(structuredClone(save), rng, nextMatch.date, {});
     onUpdate(updated);
+  };
+
+  // Geen eigen wedstrijd meer, maar beker/Europa loopt nog: speel de rest uit.
+  const simulateRest = () => {
+    const rng = new Rng(hashSeed(`${save.id}:rest:${season.currentDate}`));
+    onUpdate(simulateRemaining(structuredClone(save), rng));
   };
 
   const focus: TrainingFocus = save.manager.trainingFocus ?? "balanced";
@@ -317,7 +324,14 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               </button>
             </div>
           ) : (
-            <div className="ch-done">Geen wedstrijd ingepland.</div>
+            <div className="ch-season-end">
+              <div className="ch-done">
+                Geen eigen wedstrijd meer, maar er lopen nog toernooien.
+              </div>
+              <button className="btn primary" onClick={simulateRest}>
+                Speel resterende wedstrijden
+              </button>
+            </div>
           )}
 
           <h3 className="ch-recent-title">Recente uitslagen</h3>

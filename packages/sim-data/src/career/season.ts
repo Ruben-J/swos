@@ -73,17 +73,14 @@ export interface PlayMatchdayOptions {
   liveAwayGoals?: number;
 }
 
-/**
- * Speel de complete speeldag van de gekozen club: pas (optioneel) de live-uitslag
- * toe en quicksim alle andere geplande wedstrijden op diezelfde datum (alle
- * divisies). Zet de seizoensdatum door. Muteert en geeft de save terug.
- */
-export function playMatchday(
+/** Werk één kalenderdatum af: alle geplande wedstrijden op `date` (alle
+ *  competities), daarna knockouts, blessures, training en AI-transfers. */
+function simulateDate(
   save: CareerSave,
   rng: Rng,
   date: string,
-  opts: PlayMatchdayOptions = {},
-): CareerSave {
+  opts: PlayMatchdayOptions,
+): void {
   const ratings = buildRatings(save);
   for (const m of save.worldState.matches) {
     if (m.state !== "scheduled" || m.date !== date) continue;
@@ -95,23 +92,69 @@ export function playMatchday(
   }
   // Knockout-rondes: beslis gelijke duels (pens) en loot volgende rondes.
   processKnockouts(save, rng);
-
-  // Blessures/schorsingen verwerken na de speeldag (herstel + nieuwe).
+  // Blessures/schorsingen (herstel + nieuwe).
   processMatchdayEvents(save, rng, save.manager.currentTeamId);
-
   // Training/veroudering: hele wereld groeit/loopt terug, eigen club met focus.
   processTraining(save, rng, save.manager.currentTeamId, save.manager.trainingFocus ?? "balanced");
-
   // AI-clubs handelen onderling als de transferperiode open is.
   if (transferWindowOpen(save)) processAiTransfers(save, rng);
+}
 
-  // Seizoensdatum naar de eerstvolgende nog te spelen wedstrijd.
+/** Zet de seizoensdatum op de eerstvolgende nog te spelen wedstrijd. */
+function advanceDate(save: CareerSave, fallback: string): void {
   const upcoming = save.worldState.matches
     .filter((m) => m.state === "scheduled")
     .map((m) => m.date)
     .sort();
   const season = save.worldState.seasons.find((s) => s.id === save.worldState.activeSeasonId);
-  if (season) season.currentDate = upcoming[0] ?? date;
+  if (season) season.currentDate = upcoming[0] ?? fallback;
+}
+
+/**
+ * Werk alle openstaande speeldagen af t/m `date` (in datumvolgorde), zodat ook
+ * tussenliggende beker-/Europa-rondes waarop de eigen club niet speelt worden
+ * gespeeld. De live-uitslag geldt voor de eigen wedstrijd op `date`. Muteert en
+ * geeft de save terug.
+ */
+export function playMatchday(
+  save: CareerSave,
+  rng: Rng,
+  date: string,
+  opts: PlayMatchdayOptions = {},
+): CareerSave {
+  const dates = [
+    ...new Set(
+      save.worldState.matches
+        .filter((m) => m.state === "scheduled" && m.date <= date)
+        .map((m) => m.date),
+    ),
+  ].sort();
+  // Niets vóór `date` gepland (of `date` zelf leeg): werk in elk geval `date` af.
+  if (dates.length === 0) dates.push(date);
+  for (const d of dates) {
+    simulateDate(save, rng, d, d === date ? opts : {});
+  }
+  advanceDate(save, date);
+  return save;
+}
+
+/**
+ * Speel alle resterende wedstrijden van het seizoen uit (alle competities),
+ * bijvoorbeeld als de eigen club is uitgeschakeld maar beker/Europa nog lopen.
+ * Muteert en geeft de save terug.
+ */
+export function simulateRemaining(save: CareerSave, rng: Rng): CareerSave {
+  let guard = 0;
+  while (!seasonComplete(save) && guard < 400) {
+    const next = save.worldState.matches
+      .filter((m) => m.state === "scheduled")
+      .map((m) => m.date)
+      .sort()[0];
+    if (!next) break;
+    simulateDate(save, rng, next, {});
+    guard++;
+  }
+  advanceDate(save, save.worldState.seasons.find((s) => s.id === save.worldState.activeSeasonId)?.currentDate ?? "");
   return save;
 }
 

@@ -4,7 +4,13 @@ import { buildDoubleRoundRobin, totalRounds } from "./fixtures.js";
 import { computeStandings } from "./standings.js";
 import { buildWorld } from "../world/build.js";
 import { createCareer } from "../world/build.js";
-import { divisionStandings, playMatchday, seasonComplete, teamNextMatch } from "./season.js";
+import {
+  divisionStandings,
+  playMatchday,
+  seasonComplete,
+  simulateRemaining,
+  teamNextMatch,
+} from "./season.js";
 import { advanceToNextSeason } from "./rollover.js";
 import { buyPlayer, sellPlayer, squadSize, transferTargets, transferWindowOpen } from "./transfers.js";
 import { isAvailable } from "./events.js";
@@ -322,6 +328,38 @@ describe("training", () => {
     const shotA = a.worldState.players[idx]!.attributes.shooting;
     const shotB = b.worldState.players[idx]!.attributes.shooting;
     expect(shotA).toBeGreaterThan(shotB);
+  });
+});
+
+describe("speeldag-doorloop", () => {
+  it("alleen eigen wedstrijden spelen werkt beker/Europa toch af (geen vastloper)", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+
+    // Mimic de UI: spring telkens naar de EIGEN volgende wedstrijd (niet alle
+    // datums). Tussenliggende beker-/Europa-rondes moeten meeliften.
+    const simRng = new Rng(1);
+    let guard = 0;
+    let next = teamNextMatch(save.worldState.matches, myTeam.id);
+    while (next && guard < 120) {
+      save = playMatchday(save, simRng, next.date);
+      next = teamNextMatch(save.worldState.matches, myTeam.id);
+      guard++;
+    }
+    // Eigen club heeft geen wedstrijden meer, maar het seizoen kan nog toernooien
+    // hebben lopen -> speel de rest uit.
+    save = simulateRemaining(save, simRng);
+
+    expect(seasonComplete(save)).toBe(true);
+    // Elke knockout heeft een kampioen.
+    const kos = save.worldState.competitions.filter(
+      (c) => c.format === "knockout" && c.seasonId === save.worldState.activeSeasonId,
+    );
+    expect(kos.length).toBeGreaterThan(0);
+    for (const ko of kos) {
+      expect(knockoutChampion(save, ko.id)).not.toBeNull();
+    }
   });
 });
 
