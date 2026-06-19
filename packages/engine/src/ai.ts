@@ -488,8 +488,16 @@ export function computeAiCommand(
   }
 
   if (teamHasBall) {
-    // Support: beweeg naar positionele target (al opgeschoven door de tactische laag).
-    moveTo(cmd, player, target, dist(player.pos, ball.pos) > 24);
+    // Support + VRIJLOPEN: beweeg naar het positionele target, maar zit er een
+    // tegenstander dichtbij, kies dan een punt wég van hem (ruimte zoeken / een
+    // passlijn aanbieden) i.p.v. stil in de dekking te blijven staan.
+    let aim = target;
+    const marker = nearestOpponentNear(opponents, player.pos, 6.5);
+    if (marker) {
+      const away = normalize({ x: player.pos.x - marker.pos.x, y: player.pos.y - marker.pos.y });
+      aim = { x: target.x + away.x * 4.5, y: target.y + away.y * 4.5 };
+    }
+    moveTo(cmd, player, aim, dist(player.pos, ball.pos) > 24);
     return cmd;
   }
 
@@ -557,9 +565,13 @@ export function computeAiCommand(
         moveTo(cmd, player, press, dist(player.pos, press) > 3);
         if (dist(player.pos, man.pos) < (nearOwnGoal ? 2.1 : 1.7)) cmd.tackle = true;
       } else {
-        // Geen bal: goal-zijde positie; krap dekken dichtbij het doel, anders
-        // met wat ruimte. Niet achter de eigen doellijn/keeper.
-        const gap = nearOwnGoal ? 2.4 : 4.5;
+        // Geen bal: goal-zijde positie. De DEKKINGSAFSTAND schaalt met hoe ver de
+        // bal van deze man ligt: ligt de bal ver weg, geef dan ruimte (losser);
+        // komt de bal die kant op, dek dan strak. Dichtbij het eigen doel sowieso
+        // krap. Niet achter de eigen doellijn/keeper.
+        const ballToMan = dist(ball.pos, man.pos);
+        let gap = clamp(2.2 + ballToMan * 0.14, 2.2, 8);
+        if (nearOwnGoal) gap = Math.min(gap, 2.8);
         const mx = man.pos.x + toGoal.x * gap;
         let x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
         // Opstappen / buitenspelval: ligt de bal NIET dichtbij, dan zakt de dekker

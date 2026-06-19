@@ -191,3 +191,19 @@ describe("achterhoede sluit aan", () => {
     expect(fwd).toBeGreaterThan(50); // tot rond de middenlijn
   });
 });
+
+describe("vrijlopen", () => {
+  it("een speler zonder bal beweegt weg van een dichte dekker als een teamgenoot de bal heeft", () => {
+    const ball = createBall({ x: 40, y: 34 });
+    ball.ownerId = "carrier"; // teamgenoot in balbezit
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const carrier = pl("carrier", "home", 40, 34, "CM");
+    const free = pl("free", "home", 51, 34, "CM"); // staat op zijn formatieplek
+    const marker = pl("mk", "away", 51, 37, "ST"); // dekker net naast hem (hogere y)
+    const players = [gk, carrier, free, marker];
+    const plan = computeTeamPlan(players, ball, "home", "home");
+    const cmd = computeAiCommand(players, ball, free, "home", plan);
+    // Loopt vrij: weg van de dekker, dus naar lagere y.
+    expect(cmd.move.y).toBeLessThan(0);
+  });
+});
