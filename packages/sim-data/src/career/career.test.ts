@@ -20,7 +20,7 @@ import { processTraining } from "./training.js";
 import { processAiTransfers } from "./aitransfers.js";
 import { myYouthProspects, potentialStars } from "./youth.js";
 import { acceptJobOffer, generateJobOffers, updateManagerReputation } from "./jobs.js";
-import { playerOverall } from "../world/squad.js";
+import { playerOverall, toTeamSetup } from "../world/squad.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -360,6 +360,38 @@ describe("speeldag-doorloop", () => {
     for (const ko of kos) {
       expect(knockoutChampion(save, ko.id)).not.toBeNull();
     }
+  });
+});
+
+describe("opstelling/tactiek", () => {
+  it("toTeamSetup respecteert gekozen formatie, opstelling en speelstijl", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const team = world.teams[0]!;
+    const players = world.players.filter((p) => p.teamId === team.id);
+
+    // Kies bewust een keeper als eerste slot en een specifieke 11.
+    const gk = players.find((p) => p.preferredPositions[0] === "GK")!;
+    const others = players.filter((p) => p.id !== gk.id).slice(0, 10);
+    const lineup = [gk.id, ...others.map((p) => p.id)];
+
+    const setup = toTeamSetup(team, players, {
+      formationName: "3-5-2",
+      lineup,
+      shape: { lineHeight: 0.7, press: 0.85, width: 0.4, tempo: 0.8 },
+    });
+
+    expect(setup.formationName).toBe("3-5-2");
+    expect(setup.players.length).toBe(11);
+    expect(setup.players[0]!.id).toBe(gk.id);
+    expect(setup.players[0]!.position).toBe("GK");
+    // Geen dubbele spelers.
+    expect(new Set(setup.players.map((p) => p.id)).size).toBe(11);
+    // Speelstijl uit de override (geclamped).
+    expect(setup.tactics.press).toBeCloseTo(0.85, 5);
+
+    // Zonder override valt het terug op de automatische beste XI.
+    const auto = toTeamSetup(team, players);
+    expect(auto.players.length).toBe(11);
   });
 });
 

@@ -216,22 +216,29 @@ function toMatchStats(p: Player): MatchPlayerStats {
   };
 }
 
-/** Kies de beste XI in de teamformatie en bouw een engine-TeamSetup voor live spel. */
-export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
-  const formationName = teamFormationName(team.id);
+/** Hoe goed past een speler op een formatieslot (0 = exact, hoger = slechter). */
+function positionFit(p: Player, slot: Position): number {
+  const pref = p.preferredPositions[0] ?? "CM";
+  if (pref === slot) return 0;
+  const group = (pos: Position): string =>
+    pos === "GK" ? "g" : "RB LB CB DM".includes(pos) ? "d" : "RW LW ST".includes(pos) ? "a" : "m";
+  return group(pref) === group(slot) ? 1 : 2;
+}
+
+/**
+ * Kies de beste XI voor een formatie uit een spelersgroep. Geblesseerde/geschorste
+ * spelers blijven buiten beeld zolang er 11 fitte over zijn. Geeft de toewijzing
+ * speler->slot in formatievolgorde.
+ */
+export function pickBestEleven(
+  players: Player[],
+  formationName: string,
+): { player: Player; slot: Position }[] {
   const formation = (FORMATIONS[formationName] ?? FORMATIONS["4-4-2"]!) as Position[];
-  // Geblesseerde/geschorste spelers niet opstellen — tenzij er anders geen 11 zijn.
   const fit = players.filter((p) => p.status.injury === null && p.status.suspensionMatchesRemaining === 0);
   const usable = fit.length >= 11 ? fit : players;
   const pool = [...usable].sort((a, b) => playerOverall(b) - playerOverall(a));
   const used = new Set<string>();
-  const positionFit = (p: Player, slot: Position): number => {
-    const pref = p.preferredPositions[0] ?? "CM";
-    if (pref === slot) return 0;
-    const group = (pos: Position): string =>
-      pos === "GK" ? "g" : "RB LB CB DM".includes(pos) ? "d" : "RW LW ST".includes(pos) ? "a" : "m";
-    return group(pref) === group(slot) ? 1 : 2;
-  };
   const chosen: { player: Player; slot: Position }[] = [];
   for (const slot of formation) {
     let best: Player | null = null;
@@ -248,6 +255,58 @@ export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
       used.add(best.id);
       chosen.push({ player: best, slot });
     }
+  }
+  return chosen;
+}
+
+export interface TeamSetupOverride {
+  /** Formatienaam; valt terug op de clubvoorkeur. */
+  formationName?: string;
+  /** 11 speler-id's in slotvolgorde; ontbrekende/onbekende slots vult de beste XI. */
+  lineup?: string[];
+  /** Tactische instellingen (0..1). */
+  shape?: { lineHeight: number; press: number; width: number; tempo: number };
+}
+
+/** Kies de XI in de teamformatie en bouw een engine-TeamSetup voor live spel.
+ *  Met `override` bepaalt de manager formatie/opstelling/tactiek zelf. */
+export function toTeamSetup(team: Team, players: Player[], override?: TeamSetupOverride): TeamSetup {
+  const formationName = override?.formationName || teamFormationName(team.id);
+  const formation = (FORMATIONS[formationName] ?? FORMATIONS["4-4-2"]!) as Position[];
+
+  let chosen: { player: Player; slot: Position }[];
+  const lineup = override?.lineup;
+  if (lineup && lineup.length > 0) {
+    // Handmatige opstelling: wijs gekozen spelers toe op slotvolgorde, vul gaten
+    // met de beste resterende spelers.
+    const byId = new Map(players.map((p) => [p.id, p]));
+    const used = new Set<string>();
+    chosen = [];
+    formation.forEach((slot, i) => {
+      const pid = lineup[i];
+      const p = pid ? byId.get(pid) : undefined;
+      if (p && !used.has(p.id)) {
+        used.add(p.id);
+        chosen.push({ player: p, slot });
+      } else {
+        chosen.push({ player: null as unknown as Player, slot });
+      }
+    });
+    // Vul lege slots met beste beschikbare (niet-gebruikte) speler.
+    const rest = [...players]
+      .filter((p) => !used.has(p.id))
+      .sort((a, b) => playerOverall(b) - playerOverall(a));
+    for (const c of chosen) {
+      if (c.player) continue;
+      const pick = rest.shift();
+      if (pick) {
+        used.add(pick.id);
+        c.player = pick;
+      }
+    }
+    chosen = chosen.filter((c) => c.player);
+  } else {
+    chosen = pickBestEleven(players, formationName);
   }
 
   const setupPlayers: MatchPlayerSetup[] = chosen.map(({ player, slot }, i) => {
@@ -272,11 +331,18 @@ export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
     colorSecondary: team.colors.secondary,
     players: setupPlayers,
     formationName,
-    tactics: {
-      lineHeight: clamp(team.tacticalIdentity.press, 0.35, 0.7),
-      press: clamp(team.tacticalIdentity.press, 0.4, 0.85),
-      width: clamp(team.tacticalIdentity.width, 0.4, 0.72),
-      tempo: clamp(team.tacticalIdentity.tempo, 0.4, 0.8),
-    },
+    tactics: override?.shape
+      ? {
+          lineHeight: clamp(override.shape.lineHeight, 0.35, 0.7),
+          press: clamp(override.shape.press, 0.4, 0.85),
+          width: clamp(override.shape.width, 0.4, 0.72),
+          tempo: clamp(override.shape.tempo, 0.4, 0.8),
+        }
+      : {
+          lineHeight: clamp(team.tacticalIdentity.press, 0.35, 0.7),
+          press: clamp(team.tacticalIdentity.press, 0.4, 0.85),
+          width: clamp(team.tacticalIdentity.width, 0.4, 0.72),
+          tempo: clamp(team.tacticalIdentity.tempo, 0.4, 0.8),
+        },
   };
 }

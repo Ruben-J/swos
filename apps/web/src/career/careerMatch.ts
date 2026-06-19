@@ -27,8 +27,10 @@ export function teamById(save: CareerSave, teamId: UUID) {
 export function buildMatchConfig(save: CareerSave, match: Match, humanTeamId: UUID): MatchConfig {
   const home = teamById(save, match.homeTeamId)!;
   const away = teamById(save, match.awayTeamId)!;
-  const homeSetup = toTeamSetup(home, playersOfTeam(save, home.id));
-  const awaySetup = toTeamSetup(away, playersOfTeam(save, away.id));
+  // De door de manager gekozen opstelling/tactiek geldt voor zijn eigen club.
+  const mine = save.manager.tactics;
+  const homeSetup = toTeamSetup(home, playersOfTeam(save, home.id), home.id === humanTeamId ? mine : undefined);
+  const awaySetup = toTeamSetup(away, playersOfTeam(save, away.id), away.id === humanTeamId ? mine : undefined);
   return {
     seed: hashSeed(match.id),
     home: homeSetup,

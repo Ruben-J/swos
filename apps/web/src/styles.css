@@ -1302,3 +1302,56 @@ kbd {
 .pd-attr-bar { height: 6px; background: #1d2730; border-radius: 3px; overflow: hidden; }
 .pd-attr-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 .pd-attr-v { font-size: 0.82rem; text-align: right; }
+
+/* --- Speelschema eigen club --- */
+.myc-list { list-style: none; }
+.myc-row {
+  display: grid;
+  grid-template-columns: 80px 1.3fr 90px 56px 1.3fr 130px;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.4rem 0.4rem;
+  border-bottom: 1px solid #1a232b;
+  font-size: 0.88rem;
+}
+.myc-row.now { background: #14201a; border-radius: 6px; }
+.myc-date { color: var(--accent-2); font-weight: 600; }
+.myc-comp { color: var(--text); }
+.myc-round, .myc-ha { color: var(--muted); }
+.myc-opp { font-weight: 600; }
+.myc-tag {
+  display: inline-block;
+  width: 18px; text-align: center;
+  border-radius: 4px;
+  font-size: 0.72rem; font-weight: 700;
+}
+.myc-tag-W { background: #1d3b29; color: #4fd08a; }
+.myc-tag-V { background: #3a1c1f; color: #e8736f; }
+.myc-tag-G { background: #2c2f1c; color: #d9c46a; }
+
+/* --- Tactiek --- */
+.ch-tacticstab { grid-template-columns: 1.1fr 1fr; }
+.tac-formrow { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; }
+.tac-lineup { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+.tac-lineup li { display: grid; grid-template-columns: 40px 1fr; gap: 0.5rem; align-items: center; }
+.tac-lineup li.tac-unavail .tac-slot { color: #e8736f; }
+.tac-slot {
+  font-size: 0.78rem; font-weight: 700; color: var(--accent-2);
+  text-align: center;
+  background: #16211b; border-radius: 5px; padding: 0.2rem 0;
+}
+.tac-select { width: 100%; }
+.tac-sliders { display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1rem; }
+.tac-slider-top { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.tac-slider-val { color: var(--accent); font-weight: 700; }
+.tac-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+.tac-slider-ends { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+.tac-bench { list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+.tac-bench li {
+  display: grid;
+  grid-template-columns: 36px 1fr auto 30px;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 0.15rem 0.2rem;
+}

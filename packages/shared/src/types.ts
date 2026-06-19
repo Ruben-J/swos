@@ -233,6 +233,16 @@ export interface Season {
 /** Wekelijkse trainingsfocus: stuurt welke attributen sneller groeien. */
 export type TrainingFocus = "balanced" | "attack" | "defense" | "fitness" | "youth";
 
+/** Door de manager gekozen opstelling/tactiek voor zijn eigen club. */
+export interface ManagerTactics {
+  /** Formatienaam (bv. "4-3-3"); leeg = automatisch op clubvoorkeur. */
+  formation: string;
+  /** 11 speler-id's in slotvolgorde van de formatie; leeg = beste XI. */
+  lineup: UUID[];
+  /** Tactische instellingen (0..1); ontbreekt = clubidentiteit. */
+  shape?: { lineHeight: number; press: number; width: number; tempo: number };
+}
+
 /** Een baanaanbod van een andere club aan de manager (bij seizoensovergang). */
 export interface JobOffer {
   teamId: UUID;
@@ -262,6 +272,8 @@ export interface CareerSave {
     trainingFocus?: TrainingFocus;
     /** Openstaande baanaanbiedingen (na een seizoensovergang). */
     pendingOffers?: JobOffer[];
+    /** Door de manager gekozen opstelling + tactiek van de eigen club. */
+    tactics?: ManagerTactics;
   };
   worldState: {
     activeSeasonId: UUID;

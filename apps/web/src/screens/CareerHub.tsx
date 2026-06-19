@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Rng, hashSeed, type CareerSave, type Match, type Player, type TrainingFocus, type UUID } from "@pitch/shared";
+import { FORMATIONS } from "@pitch/engine";
 import {
   askingPrice,
   buyPlayer,
@@ -11,6 +12,7 @@ import {
   declineJobOffers,
   knockoutChampion,
   myYouthProspects,
+  pickBestEleven,
   playMatchday,
   playerOverall,
   potentialStars,
@@ -20,6 +22,7 @@ import {
   sellPlayer,
   squadSize,
   statusLabel,
+  teamFormationName,
   teamNextMatch,
   transferTargets,
   transferWindowOpen,
@@ -75,7 +78,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
   const [tab, setTab] = useState<
-    "overzicht" | "selectie" | "training" | "jeugd" | "kalender" | "transfers" | "competities"
+    "overzicht" | "selectie" | "tactiek" | "training" | "jeugd" | "kalender" | "transfers" | "competities"
   >("overzicht");
 
   const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "";
@@ -160,6 +163,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               Selectie
             </button>
             <button
+              className={`ch-tab${tab === "tactiek" ? " sel" : ""}`}
+              onClick={() => setTab("tactiek")}
+            >
+              Tactiek
+            </button>
+            <button
               className={`ch-tab${tab === "training" ? " sel" : ""}`}
               onClick={() => setTab("training")}
             >
@@ -226,6 +235,8 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
           </section>
         </div>
       )}
+
+      {tab === "tactiek" && <TacticsView save={save} onUpdate={onUpdate} />}
 
       {tab === "training" && <TrainingView focus={focus} setFocus={setFocus} />}
 
@@ -438,6 +449,164 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
   );
 }
 
+const SHAPE_SLIDERS: { key: "lineHeight" | "press" | "width" | "tempo"; label: string; lo: string; hi: string }[] = [
+  { key: "lineHeight", label: "Verdedigingslinie", lo: "laag", hi: "hoog" },
+  { key: "press", label: "Pressing", lo: "afwachtend", hi: "agressief" },
+  { key: "width", label: "Breedte", lo: "smal", hi: "breed" },
+  { key: "tempo", label: "Tempo", lo: "rustig", hi: "snel" },
+];
+
+/** Tactiek: kies formatie, basiself en speelstijl voor de eigen club. */
+function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: CareerSave) => void }) {
+  const ws = save.worldState;
+  const myId = save.manager.currentTeamId;
+  const team = ws.teams.find((t) => t.id === myId)!;
+  const squad = useMemo(() => ws.players.filter((p) => p.teamId === myId), [ws.players, myId]);
+
+  const tac = save.manager.tactics;
+  const formation = tac?.formation || teamFormationName(myId);
+  const slots = FORMATIONS[formation] ?? FORMATIONS["4-4-2"]!;
+  const defaultLineup = useMemo(
+    () => pickBestEleven(squad, formation).map((c) => c.player.id),
+    [squad, formation],
+  );
+  const lineup = tac?.lineup && tac.lineup.length === slots.length ? tac.lineup : defaultLineup;
+  const shape = tac?.shape ?? {
+    lineHeight: team.tacticalIdentity.press,
+    press: team.tacticalIdentity.press,
+    width: team.tacticalIdentity.width,
+    tempo: team.tacticalIdentity.tempo,
+  };
+
+  const write = (next: { formation?: string; lineup?: UUID[]; shape?: typeof shape }) => {
+    const s = structuredClone(save);
+    s.manager.tactics = {
+      formation: next.formation ?? formation,
+      lineup: next.lineup ?? lineup,
+      shape: next.shape ?? shape,
+    };
+    onUpdate(s);
+  };
+
+  const changeFormation = (f: string) => {
+    const newDefault = pickBestEleven(squad, f).map((c) => c.player.id);
+    write({ formation: f, lineup: newDefault });
+  };
+
+  const setSlot = (i: number, pid: UUID) => {
+    const next = [...lineup];
+    const j = next.indexOf(pid);
+    if (j >= 0 && j !== i) next[j] = next[i]!; // wissel om om duplicaten te voorkomen
+    next[i] = pid;
+    write({ lineup: next });
+  };
+
+  const setShape = (key: typeof SHAPE_SLIDERS[number]["key"], val: number) => {
+    write({ shape: { ...shape, [key]: val } });
+  };
+
+  const reset = () => {
+    const s = structuredClone(save);
+    s.manager.tactics = undefined;
+    onUpdate(s);
+  };
+
+  const starters = new Set(lineup);
+  const bench = squad
+    .filter((p) => !starters.has(p.id))
+    .sort((a, b) => playerOverall(b) - playerOverall(a));
+  const label = (p: Player): string => {
+    const st = statusLabel(p);
+    return `${p.preferredPositions[0]} · ${p.firstName[0]}. ${p.lastName} (${playerOverall(p)})${st ? ` ${st}` : ""}`;
+  };
+  const playerById = (id: UUID): Player | undefined => squad.find((p) => p.id === id);
+
+  return (
+    <div className="ch-body ch-tacticstab">
+      <section className="ch-panel ch-tac-left">
+        <div className="comp-head">
+          <h2>Tactiek</h2>
+          <button className="ch-offer-decline" onClick={reset}>Herstel automatisch</button>
+        </div>
+        <div className="tac-formrow">
+          <span className="ch-train-label">Formatie</span>
+          <div className="ch-train-opts">
+            {Object.keys(FORMATIONS).map((f) => (
+              <button
+                key={f}
+                className={`ch-train-btn${f === formation ? " sel" : ""}`}
+                onClick={() => changeFormation(f)}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <h3 className="ch-recent-title">Basiself</h3>
+        <ol className="tac-lineup">
+          {slots.map((slot, i) => {
+            const p = playerById(lineup[i] ?? "");
+            const st = p ? statusLabel(p) : null;
+            return (
+              <li key={i} className={st ? "tac-unavail" : ""}>
+                <span className="tac-slot">{slot}</span>
+                <select
+                  className="cs-input tac-select"
+                  value={lineup[i] ?? ""}
+                  onChange={(e) => setSlot(i, e.target.value)}
+                >
+                  {p && <option value={p.id}>{label(p)}</option>}
+                  {bench.map((b) => (
+                    <option key={b.id} value={b.id}>{label(b)}</option>
+                  ))}
+                </select>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      <section className="ch-panel ch-tac-right">
+        <h2>Speelstijl</h2>
+        <div className="tac-sliders">
+          {SHAPE_SLIDERS.map((s) => (
+            <div key={s.key} className="tac-slider">
+              <div className="tac-slider-top">
+                <span>{s.label}</span>
+                <span className="tac-slider-val">{Math.round(shape[s.key] * 100)}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={shape[s.key]}
+                onChange={(e) => setShape(s.key, parseFloat(e.target.value))}
+              />
+              <div className="tac-slider-ends">
+                <span>{s.lo}</span>
+                <span>{s.hi}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <h3 className="ch-recent-title">Reservebank</h3>
+        <ul className="tac-bench">
+          {bench.map((p) => (
+            <li key={p.id}>
+              <span className="tr-pos">{p.preferredPositions[0]}</span>
+              <span className="tr-name">{p.firstName[0]}. {p.lastName}</span>
+              <span className="ch-status">{statusLabel(p) ?? ""}</span>
+              <span className="tr-ovr">{playerOverall(p)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 /** Trainingstab: kies de wekelijkse focus + uitleg wat training doet. */
 function TrainingView({
   focus,
@@ -479,62 +648,68 @@ function TrainingView({
   );
 }
 
-/** Kalender: alle speelrondes van alle competities, gegroepeerd per datum. */
+/** Kalender: het volledige speelschema van de eigen club over alle competities. */
 function CalendarView({ save }: { save: CareerSave }) {
   const ws = save.worldState;
   const myId = save.manager.currentTeamId;
-  const teamShort = (id: UUID): string => ws.teams.find((t) => t.id === id)?.shortName ?? "?";
-  const compName = (id: UUID): string =>
-    ws.competitions.find((c) => c.id === id)?.name ?? "?";
+  const teamName = (id: UUID): string => ws.teams.find((t) => t.id === id)?.name ?? "?";
+  const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "?";
 
-  // Groepeer per datum -> per competitie (ronde + of mijn club speelt).
-  const byDate = useMemo(() => {
-    const map = new Map<
-      string,
-      Map<UUID, { round: string; mine: Match | null; count: number }>
-    >();
-    for (const m of ws.matches.filter((x) => x.seasonId === ws.activeSeasonId)) {
-      const comps = map.get(m.date) ?? new Map();
-      const entry = comps.get(m.competitionId) ?? { round: m.roundLabel, mine: null, count: 0 };
-      entry.count += 1;
-      if (m.homeTeamId === myId || m.awayTeamId === myId) entry.mine = m;
-      comps.set(m.competitionId, entry);
-      map.set(m.date, comps);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [ws.matches, ws.activeSeasonId, myId]);
+  const myMatches = useMemo(
+    () =>
+      ws.matches
+        .filter(
+          (m) =>
+            m.seasonId === ws.activeSeasonId &&
+            (m.homeTeamId === myId || m.awayTeamId === myId),
+        )
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    [ws.matches, ws.activeSeasonId, myId],
+  );
 
-  const today = save.worldState.seasons.find((s) => s.id === ws.activeSeasonId)?.currentDate ?? "";
+  const today = ws.seasons.find((s) => s.id === ws.activeSeasonId)?.currentDate ?? "";
 
   return (
     <div className="ch-body">
       <section className="ch-panel ch-cal">
-        <h2>Kalender — {save.worldState.seasons.find((s) => s.id === ws.activeSeasonId)?.label}</h2>
-        <ul className="cal-list">
-          {byDate.map(([date, comps]) => (
-            <li key={date} className={`cal-day${date === today ? " now" : ""}`}>
-              <div className="cal-date">{formatShort(date)}</div>
-              <ul className="cal-comps">
-                {[...comps.entries()].map(([cid, e]) => (
-                  <li key={cid} className={e.mine ? "cal-mine" : ""}>
-                    <span className="cal-cname">{compName(cid)}</span>
-                    <span className="cal-round">{e.round}</span>
-                    {e.mine ? (
-                      <span className="cal-fix">
-                        {teamShort(e.mine.homeTeamId)}
-                        {e.mine.state === "played"
-                          ? ` ${e.mine.score.home}–${e.mine.score.away} `
-                          : " – "}
-                        {teamShort(e.mine.awayTeamId)}
-                      </span>
-                    ) : (
-                      <span className="cal-count">{e.count} wedstrijden</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
+        <h2>Speelschema — {ws.seasons.find((s) => s.id === ws.activeSeasonId)?.label}</h2>
+        <ul className="myc-list">
+          {myMatches.map((m) => {
+            const home = m.homeTeamId === myId;
+            const opp = teamName(home ? m.awayTeamId : m.homeTeamId);
+            const played = m.state === "played";
+            const gf = home ? m.score.home : m.score.away;
+            const ga = home ? m.score.away : m.score.home;
+            const res = played ? (gf > ga ? "W" : gf < ga ? "V" : "G") : "";
+            const pens =
+              played && m.score.home === m.score.away && m.score.pensHome !== undefined
+                ? ` (${home ? m.score.pensHome : m.score.pensAway}-${home ? m.score.pensAway : m.score.pensHome} p)`
+                : "";
+            return (
+              <li
+                key={m.id}
+                className={`myc-row${m.date === today && !played ? " now" : ""}${
+                  played ? ` myc-${res}` : ""
+                }`}
+              >
+                <span className="myc-date">{formatShort(m.date)}</span>
+                <span className="myc-comp">{compName(m.competitionId)}</span>
+                <span className="myc-round">{m.roundLabel}</span>
+                <span className="myc-ha">{home ? "thuis" : "uit"}</span>
+                <span className="myc-opp">{opp}</span>
+                <span className="myc-res">
+                  {played ? (
+                    <>
+                      <span className={`myc-tag myc-tag-${res}`}>{res}</span> {gf}–{ga}
+                      {pens}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </section>
     </div>
