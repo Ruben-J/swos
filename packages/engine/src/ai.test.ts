@@ -142,3 +142,19 @@ describe("aansluiting & diepteloper", () => {
     expect(cmd.move.x).toBeGreaterThan(0);
   });
 });
+
+describe("losse bal achterin", () => {
+  it("een eigen losse bal zonder diepteloper wordt door de dichtste verdediger opgepakt", () => {
+    const ball = createBall({ x: 20, y: 34 });
+    // Zachte aanraking achterin (geen vooruit gespeelde steekpass) -> geen loper.
+    kickBall(ball, { dir: { x: -1, y: 0 }, power: 5, byId: "x", bySide: "home" });
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const def = pl("d", "home", 28, 34, "CB"); // dichtst bij de losse bal
+    const mid = pl("m", "home", 55, 34, "CM");
+    const plan = computeTeamPlan([gk, def, mid], ball, "home", null);
+    expect(plan.runnerId).toBeNull();
+    const cmd = computeAiCommand([gk, def, mid], ball, def, null, plan);
+    // Verdediger loopt richting de bal (naar links, kleinere x).
+    expect(cmd.move.x).toBeLessThan(0);
+  });
+});

@@ -480,9 +480,11 @@ export function computeAiCommand(
     return cmd;
   }
 
-  // Verdedigen / losse bal. Een eigen vooruit gespeelde bal laten we aan de
-  // aangewezen loper over (hierboven); anderen jagen 'm niet ook nog na.
-  if (player.id === plan.presserId || (ballLoose && !ourLoosePass && isClosestOutfield(players, player, ball.pos))) {
+  // Verdedigen / losse bal. Een eigen vooruit gespeelde bal mét aangewezen loper
+  // laten we aan die loper over (hierboven); anders (bv. een losse bal achterin)
+  // gaat de dichtste man er gewoon op af.
+  const runnerHandling = ourLoosePass && plan.runnerId !== null;
+  if (player.id === plan.presserId || (ballLoose && !runnerHandling && isClosestOutfield(players, player, ball.pos))) {
     const speed = playerMaxSpeed(player.stats, true);
     const owner = ball.ownerId;
     let aim: Vec2;

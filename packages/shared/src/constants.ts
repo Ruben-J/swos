@@ -50,7 +50,7 @@ export const BALL = {
   /** Aftertouch-venster na een trap, in seconden. */
   aftertouchWindow: 0.55,
   /** Hoeveel curve aftertouch maximaal toevoegt (zijwaartse acceleratie). */
-  aftertouchCurve: 55,
+  aftertouchCurve: 70,
   /** Hoeveel hoogte (loft) aftertouch toevoegt bij tégen de bal in sturen (lob). */
   aftertouchLoft: 36,
   /** Maximale grondsnelheid van de bal. */

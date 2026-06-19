@@ -585,7 +585,7 @@ export class MatchSim {
           cmd.kick = {
             dir: { x: Math.cos(p.facing), y: Math.sin(p.facing) },
             power,
-            loft: ramp * 0.5 + lift * 9.5,
+            loft: ramp * 2.0 + lift * 9.5,
             curve: 0,
           };
         } else {
