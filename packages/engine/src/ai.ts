@@ -229,21 +229,27 @@ export function computeTeamPlan(
     if (!p.isKeeper) outfield.push(p);
   }
 
-  // Aansluiting: in balbezit blijft het blok kort ROND de bal. Een speler staat
-  // hoogstens een rolafhankelijke afstand vóór de bal (langs de aanvalsas), zodat
-  // de aanvalslinie niet wegloopt naar de buitenspellijn terwijl de bal nog
-  // achterin/op het middenveld rondgaat. De cap schuift mee als de bal opkomt.
+  // Aansluiting: in balbezit blijft het blok kort ROND de bal — maar zónder de
+  // linie plat te slaan. Staat een speler verder vóór de bal dan een soepele
+  // drempel, dan COMPRIMEREN we alleen de overmaat (i.p.v. hard afkappen op één
+  // x). Zo behoudt iedereen zijn onderlinge diepteverschil (geen rij klonen die
+  // samen op en neer loopt), maar loopt de aanvalslinie niet weg naar de
+  // buitenspellijn terwijl de bal nog achterin/op het middenveld ligt. De drempel
+  // schuift mee met de bal, dus bij een opkomende bal komt de linie vanzelf mee.
   if (inPossession) {
     const attackDirX = side === "home" ? 1 : -1;
     for (const p of outfield) {
       const cat = roleCategory(p.position);
       if (cat !== "attacker" && cat !== "midfielder") continue; // verdedigers: lineFloor
-      const aheadCap = cat === "attacker" ? 16 : 9;
       const t = targets.get(p.id);
       if (!t) continue;
-      const limitX = ball.pos.x + attackDirX * aheadCap;
-      const x = side === "home" ? Math.min(t.x, limitX) : Math.max(t.x, limitX);
-      if (x !== t.x) targets.set(p.id, { x, y: t.y });
+      const ahead = (t.x - ball.pos.x) * attackDirX; // afstand vóór de bal
+      const soft = cat === "attacker" ? 22 : 14;
+      const hardMax = cat === "attacker" ? 32 : 22;
+      if (ahead > soft) {
+        const compressed = Math.min(soft + (ahead - soft) * 0.4, hardMax);
+        targets.set(p.id, { x: ball.pos.x + attackDirX * compressed, y: t.y });
+      }
     }
   }
 

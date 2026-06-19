@@ -113,15 +113,20 @@ describe("tacticalTarget", () => {
 });
 
 describe("aansluiting & diepteloper", () => {
-  it("in balbezit blijft een aanvaller dicht bij de bal (loopt niet naar de buitenspellijn)", () => {
+  it("in balbezit blijft de aanvalslinie kort bij de bal zonder plat te slaan", () => {
     const ball = createBall({ x: 52, y: 34 }); // bal op het middenveld
     const gk = pl("gk", "home", 6, 34, "GK");
-    const st = pl("st", "home", 84, 34, "ST"); // anker diep
+    const st1 = pl("st1", "home", 92, 30, "ST"); // anker zeer diep
+    const st2 = pl("st2", "home", 78, 38, "ST"); // anker minder diep
     const cb = pl("cb", "home", 20, 34, "CB");
-    const plan = computeTeamPlan([gk, st, cb], ball, "home", "home");
-    const t = plan.targets.get("st")!;
-    // Aanvaller staat hoogstens ~16 vóór de bal i.p.v. ver vooruit op zijn anker.
-    expect(t.x).toBeLessThanOrEqual(52 + 16 + 0.001);
+    const plan = computeTeamPlan([gk, st1, st2, cb], ball, "home", "home");
+    const a = plan.targets.get("st1")!;
+    const b = plan.targets.get("st2")!;
+    // Niet doorlopen tot de buitenspellijn: hooguit ~32 vóór de bal.
+    expect(a.x).toBeLessThanOrEqual(52 + 32 + 0.001);
+    // Maar de linie wordt NIET platgeslagen: de dieper gepositioneerde spits
+    // blijft vóór de andere staan (onderling diepteverschil blijft behouden).
+    expect(a.x).toBeGreaterThan(b.x + 1);
   });
 
   it("harde steekpass in de ruimte: de loper wordt aangewezen en loopt door (niet terug)", () => {
