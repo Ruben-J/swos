@@ -154,12 +154,21 @@ export interface Division {
 
 /** Een competitie-instantie: één seizoen van een divisie (of beker). Levert de
  *  wedstrijden; de stand leiden we af uit de gespeelde wedstrijden. */
+/** Soort competitie: nationale league, nationale beker of Europees toernooi. */
+export type CompetitionScope = "league" | "cup" | "cl" | "el" | "ecl";
+
 export interface Competition {
   id: UUID;
   seasonId: UUID;
-  divisionId: UUID;
+  /** Alleen voor leagues; null voor beker/Europese toernooien. */
+  divisionId: UUID | null;
   type: "league" | "cup";
+  /** league = volledige round-robin; knockout = bekersysteem (winnaar door). */
+  format: "league" | "knockout";
+  scope: CompetitionScope;
   name: string;
+  /** Landcode (nationale beker), of null voor league/Europees. */
+  countryCode: string | null;
   teamIds: UUID[];
 }
 

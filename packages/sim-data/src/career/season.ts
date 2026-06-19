@@ -3,6 +3,7 @@ import { playerOverall } from "../world/squad.js";
 import { quickSimulate } from "./quicksim.js";
 import { computeStandings } from "./standings.js";
 import { processMatchdayEvents } from "./events.js";
+import { processKnockouts } from "./knockout.js";
 
 /** Bereken team-ratings (0..100) uit de spelers in de save. */
 export function buildRatings(save: CareerSave): Map<UUID, number> {
@@ -89,6 +90,9 @@ export function playMatchday(
       simulateMatch(rng, ratings, m);
     }
   }
+  // Knockout-rondes: beslis gelijke duels (pens) en loot volgende rondes.
+  processKnockouts(save, rng);
+
   // Blessures/schorsingen verwerken na de speeldag (herstel + nieuwe).
   processMatchdayEvents(save, rng, save.manager.currentTeamId);
 

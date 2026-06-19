@@ -9,6 +9,7 @@ import { advanceToNextSeason } from "./rollover.js";
 import { buyPlayer, sellPlayer, squadSize, transferTargets, transferWindowOpen } from "./transfers.js";
 import { isAvailable } from "./events.js";
 import { seasonObjective } from "./board.js";
+import { knockoutChampion } from "./knockout.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -162,6 +163,14 @@ describe("career-seizoen", () => {
     const next1 = teamNextMatch(save.worldState.matches, myTeam.id);
     expect(next1).not.toBeNull();
     expect(divisionStandings(save, myDivNow).length).toBe(16);
+
+    // Volgend seizoen heeft weer bekers + Europese toernooien (plaatsing).
+    const newSeasonId = save.worldState.activeSeasonId;
+    const ko = save.worldState.competitions.filter(
+      (c) => c.seasonId === newSeasonId && c.format === "knockout",
+    );
+    expect(ko.filter((c) => c.scope === "cup").length).toBe(6);
+    expect(ko.filter((c) => c.scope === "cl").length).toBe(1);
   });
 
   it("transfers: kopen en verkopen verrekenen budget en selectie", () => {
@@ -217,6 +226,37 @@ describe("career-seizoen", () => {
     // Iedereen die fit is, is ook inzetbaar (consistente helper).
     const fit = save.worldState.players.filter((p) => p.teamId === myTeam.id && isAvailable(p));
     expect(fit.length).toBeGreaterThan(0);
+  });
+
+  it("beker + Europa: knockouts spelen uit tot een kampioen", () => {
+    const world = buildWorld(new Rng(7), 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 8, managerName: "T", teamId: myTeam.id });
+
+    // Er zijn nationale bekers (6) + 3 Europese toernooien.
+    const comps = save.worldState.competitions.filter((c) => c.format === "knockout");
+    const cups = comps.filter((c) => c.scope === "cup");
+    const euro = comps.filter((c) => c.scope === "cl" || c.scope === "el" || c.scope === "ecl");
+    expect(cups.length).toBe(6);
+    expect(euro.length).toBe(3);
+    // CL/EL/ECL met 16 deelnemers elk.
+    for (const e of euro) expect(e.teamIds.length).toBe(16);
+
+    // Speel het hele seizoen uit (alle competities, incl. dynamisch gelote rondes).
+    const simRng = new Rng(2);
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 120) {
+      const m = save.worldState.matches.find((x) => x.state === "scheduled")!;
+      save = playMatchday(save, simRng, m.date);
+      guard++;
+    }
+    expect(seasonComplete(save)).toBe(true);
+
+    // Elke knockout heeft een kampioen.
+    const cl = euro.find((c) => c.scope === "cl")!;
+    expect(knockoutChampion(save, cl.id)).not.toBeNull();
+    const anyCup = cups[0]!;
+    expect(knockoutChampion(save, anyCup.id)).not.toBeNull();
   });
 
   it("board-doel: levert een doel + huidige stand", () => {

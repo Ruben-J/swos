@@ -19,6 +19,65 @@ import { COUNTRIES, type ClubSeed } from "./catalogue.js";
 import { CLUB_SQUADS } from "./squads/index.js";
 import { buildDoubleRoundRobin } from "../career/fixtures.js";
 import { addDays } from "../career/dates.js";
+import { buildKnockout } from "../career/knockout.js";
+
+/**
+ * Bouw de nationale bekers (per land, beide divisies, knockout) en de drie
+ * Europese toernooien (CL/EL/ECL) voor één seizoen. `euroRanking` is een lijst
+ * tier-1-clubs (beste eerst); de top 16 -> CL, 17-32 -> EL, 33-48 -> ECL.
+ */
+export function buildCupsAndEuro(
+  rng: Rng,
+  seasonId: UUID,
+  divisions: Division[],
+  teams: Team[],
+  seasonStart: string,
+  euroRanking: UUID[],
+): { competitions: Competition[]; matches: Match[] } {
+  const competitions: Competition[] = [];
+  const matches: Match[] = [];
+
+  // Nationale beker per land (alle clubs van beide divisies).
+  const countries = new Map<string, string>();
+  for (const d of divisions) countries.set(d.countryCode, d.countryName);
+  for (const [code, cname] of countries) {
+    const divIds = new Set(divisions.filter((d) => d.countryCode === code).map((d) => d.id));
+    const teamIds = teams.filter((t) => divIds.has(t.divisionId)).map((t) => t.id);
+    if (teamIds.length < 2) continue;
+    const ko = buildKnockout(rng, seasonId, "cup", `${cname} Beker`, code, teamIds, addDays(seasonStart, 10));
+    competitions.push(ko.competition);
+    matches.push(...ko.matches);
+  }
+
+  // Europese toernooien uit de ranglijst.
+  const euros: { scope: "cl" | "el" | "ecl"; name: string; slice: [number, number] }[] = [
+    { scope: "cl", name: "Champions League", slice: [0, 16] },
+    { scope: "el", name: "Europa Cup", slice: [16, 32] },
+    { scope: "ecl", name: "Conference League", slice: [32, 48] },
+  ];
+  for (const e of euros) {
+    const ids = euroRanking.slice(e.slice[0], e.slice[1]);
+    if (ids.length < 2) continue;
+    const ko = buildKnockout(rng, seasonId, e.scope, e.name, null, ids, addDays(seasonStart, 17));
+    competitions.push(ko.competition);
+    matches.push(...ko.matches);
+  }
+
+  return { competitions, matches };
+}
+
+/** Rangschik tier-1-clubs (beste eerst) puur op rating — voor seizoen 1. */
+export function euroRankingByRating(
+  divisions: Division[],
+  teams: Team[],
+  ratings: Map<UUID, number>,
+): UUID[] {
+  const tier1 = new Set(divisions.filter((d) => d.tier === 1).map((d) => d.id));
+  return teams
+    .filter((t) => tier1.has(t.divisionId))
+    .sort((a, b) => (ratings.get(b.id) ?? 0) - (ratings.get(a.id) ?? 0))
+    .map((t) => t.id);
+}
 
 const NAME_POOL = { first: FIRST_NAMES, last: LAST_NAMES };
 
@@ -170,7 +229,10 @@ export function buildSeasonFixtures(
       seasonId,
       divisionId: div.id,
       type: "league",
+      format: "league",
+      scope: "league",
       name: div.name,
+      countryCode: div.countryCode,
       teamIds,
     });
     const pairings = buildDoubleRoundRobin(teamIds);
@@ -215,13 +277,12 @@ export function createCareer(world: World, opts: CreateCareerOptions): CareerSav
   const seasonStart = `${refYear}-08-15`;
 
   const seasonId = rngId(rng);
-  const { competitions, matches } = buildSeasonFixtures(
-    rng,
-    seasonId,
-    world.divisions,
-    world.teams,
-    seasonStart,
-  );
+  const league = buildSeasonFixtures(rng, seasonId, world.divisions, world.teams, seasonStart);
+  // Beker + Europese toernooien (seizoen 1: plaatsing op rating).
+  const euroRanking = euroRankingByRating(world.divisions, world.teams, world.ratings);
+  const cups = buildCupsAndEuro(rng, seasonId, world.divisions, world.teams, seasonStart, euroRanking);
+  const competitions = [...league.competitions, ...cups.competitions];
+  const matches = [...league.matches, ...cups.matches];
 
   const season: Season = {
     id: seasonId,

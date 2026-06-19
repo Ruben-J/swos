@@ -768,6 +768,59 @@ kbd {
   font-size: 0.8rem;
 }
 
+/* --- Competities (beker/Europa) --- */
+.ch-comps {
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  overflow-y: auto;
+}
+.ch-comp {
+  height: fit-content;
+}
+.comp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.comp-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.comp-status.win {
+  color: var(--accent);
+  font-weight: 700;
+}
+.comp-status.out {
+  color: #c0392b;
+}
+.comp-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+.comp-list li {
+  display: grid;
+  grid-template-columns: 70px 1fr auto;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  align-items: center;
+}
+.comp-round {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.comp-res {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.comp-champ {
+  margin-top: 0.5rem;
+  color: var(--accent-2);
+  font-size: 0.85rem;
+}
+
 /* --- Quick match team picker --- */
 .qm-pickers {
   flex: 1;

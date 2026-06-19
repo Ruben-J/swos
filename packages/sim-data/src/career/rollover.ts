@@ -6,7 +6,7 @@ import {
   type Season,
   type UUID,
 } from "@pitch/shared";
-import { buildSeasonFixtures } from "../world/build.js";
+import { buildCupsAndEuro, buildSeasonFixtures } from "../world/build.js";
 import { divisionStandings } from "./season.js";
 
 export interface PromotionMove {
@@ -91,13 +91,22 @@ export function advanceToNextSeason(
   const nextYear = seasonYear(oldSeason.label) + 1;
   const seasonStart = `${nextYear}-08-15`;
   const seasonId = rngId(rng);
-  const { competitions, matches } = buildSeasonFixtures(
-    rng,
-    seasonId,
-    ws.divisions,
-    ws.teams,
-    seasonStart,
-  );
+  const league = buildSeasonFixtures(rng, seasonId, ws.divisions, ws.teams, seasonStart);
+
+  // Europese plaatsing op basis van de eindstanden van dit seizoen: per
+  // tier-1-divisie de rangorde, geïnterleaved (alle nummers 1, dan alle 2, ...).
+  const tier1Tables = ws.divisions
+    .filter((d) => d.tier === 1)
+    .map((d) => finalTable.get(d.id) ?? []);
+  const euroRanking: UUID[] = [];
+  const maxLen = Math.max(0, ...tier1Tables.map((t) => t.length));
+  for (let pos = 0; pos < maxLen; pos++) {
+    for (const t of tier1Tables) if (t[pos]) euroRanking.push(t[pos]!);
+  }
+  const cups = buildCupsAndEuro(rng, seasonId, ws.divisions, ws.teams, seasonStart, euroRanking);
+  const competitions = [...league.competitions, ...cups.competitions];
+  const matches = [...league.matches, ...cups.matches];
+
   const season: Season = {
     id: seasonId,
     worldId: oldSeason.worldId,

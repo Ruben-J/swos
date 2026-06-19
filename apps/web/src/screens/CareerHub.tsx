@@ -6,6 +6,7 @@ import {
   canBuy,
   divisionStandings,
   formatShort,
+  knockoutChampion,
   playMatchday,
   playerOverall,
   seasonComplete,
@@ -34,8 +35,9 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const myDivision = ws.divisions.find((d) => d.id === myTeam.divisionId)!;
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
-  const [tab, setTab] = useState<"overzicht" | "selectie" | "transfers">("overzicht");
+  const [tab, setTab] = useState<"overzicht" | "selectie" | "transfers" | "competities">("overzicht");
 
+  const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "";
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
   const standings = useMemo(() => divisionStandings(save, myTeam.divisionId), [save, myTeam.divisionId]);
   const done = useMemo(() => seasonComplete(save), [save]);
@@ -100,6 +102,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               Selectie
             </button>
             <button
+              className={`ch-tab${tab === "competities" ? " sel" : ""}`}
+              onClick={() => setTab("competities")}
+            >
+              Competities
+            </button>
+            <button
               className={`ch-tab${tab === "transfers" ? " sel" : ""}`}
               onClick={() => setTab("transfers")}
             >
@@ -143,6 +151,8 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
         </div>
       )}
 
+      {tab === "competities" && <CompetitionsView save={save} />}
+
       {tab === "transfers" && <TransfersView save={save} onUpdate={onUpdate} />}
 
       <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
@@ -167,7 +177,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
                 </span>
               </div>
               <div className="ch-fixture-meta">
-                {nextMatch.roundLabel} · {formatShort(nextMatch.date)}
+                {compName(nextMatch.competitionId)} · {nextMatch.roundLabel} · {formatShort(nextMatch.date)}
               </div>
               <div className="ch-actions">
                 <button className="btn primary" onClick={() => onPlayMatch(nextMatch)}>
@@ -297,6 +307,73 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
       })}
       <td className="ch-pts">{ovr}</td>
     </tr>
+  );
+}
+
+/** Overzicht van alle competities waar de eigen club in zit (beker + Europa). */
+function CompetitionsView({ save }: { save: CareerSave }) {
+  const ws = save.worldState;
+  const myId = save.manager.currentTeamId;
+  const teamName = (id: UUID): string => ws.teams.find((t) => t.id === id)?.name ?? "?";
+
+  const knockouts = ws.competitions
+    .filter((c) => c.format === "knockout" && c.seasonId === ws.activeSeasonId && c.teamIds.includes(myId))
+    .sort((a, b) => (a.scope === "cup" ? 1 : 0) - (b.scope === "cup" ? 1 : 0));
+
+  return (
+    <div className="ch-body ch-comps">
+      {knockouts.map((comp) => {
+        const myMatches = ws.matches
+          .filter((m) => m.competitionId === comp.id && (m.homeTeamId === myId || m.awayTeamId === myId))
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const champ = knockoutChampion(save, comp.id);
+        const lastPlayed = [...myMatches].reverse().find((m) => m.state === "played");
+        let statusOut = false;
+        if (lastPlayed) {
+          const home = lastPlayed.homeTeamId === myId;
+          const gf = home ? lastPlayed.score.home : lastPlayed.score.away;
+          const ga = home ? lastPlayed.score.away : lastPlayed.score.home;
+          const pf = home ? lastPlayed.score.pensHome ?? 0 : lastPlayed.score.pensAway ?? 0;
+          const pa = home ? lastPlayed.score.pensAway ?? 0 : lastPlayed.score.pensHome ?? 0;
+          statusOut = gf < ga || (gf === ga && pf < pa);
+        }
+        const status = champ === myId ? "🏆 Gewonnen!" : statusOut ? "Uitgeschakeld" : myMatches.some((m) => m.state === "scheduled") ? "Actief" : "—";
+        return (
+          <section key={comp.id} className="ch-panel ch-comp">
+            <div className="comp-head">
+              <h2>{comp.name}</h2>
+              <span className={`comp-status${champ === myId ? " win" : statusOut ? " out" : ""}`}>{status}</span>
+            </div>
+            <ul className="comp-list">
+              {myMatches.map((m) => {
+                const home = m.homeTeamId === myId;
+                const opp = teamName(home ? m.awayTeamId : m.homeTeamId);
+                const played = m.state === "played";
+                const gf = home ? m.score.home : m.score.away;
+                const ga = home ? m.score.away : m.score.home;
+                const pens =
+                  played && m.score.home === m.score.away && m.score.pensHome !== undefined
+                    ? ` (${home ? m.score.pensHome : m.score.pensAway}-${home ? m.score.pensAway : m.score.pensHome} pen)`
+                    : "";
+                return (
+                  <li key={m.id}>
+                    <span className="comp-round">{m.roundLabel}</span>
+                    <span className="comp-opp">{home ? "thuis" : "uit"} vs {opp}</span>
+                    <span className="comp-res">{played ? `${gf}–${ga}${pens}` : formatShort(m.date)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {champ && champ !== myId && (
+              <div className="comp-champ">Winnaar: {teamName(champ)}</div>
+            )}
+          </section>
+        );
+      })}
+      {knockouts.length === 0 && (
+        <section className="ch-panel"><div className="ch-done">Geen beker-/Europese deelname dit seizoen.</div></section>
+      )}
+    </div>
   );
 }
 
