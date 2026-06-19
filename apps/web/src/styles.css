@@ -805,6 +805,62 @@ kbd {
   font-weight: 700;
 }
 
+/* --- Baanaanbiedingen --- */
+.ch-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #4a6;
+  background: #132018;
+}
+.ch-offers-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.ch-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.ch-offer-club {
+  display: flex;
+  flex-direction: column;
+}
+.ch-offer-reason {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.btn.sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+}
+.ch-offer-decline {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.1rem 0;
+}
+.ch-offer-decline:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* --- Jeugd-sterren --- */
+.ch-stars {
+  color: #ffd24a;
+  letter-spacing: 1px;
+}
+.ch-stars-dim {
+  color: #3a4038;
+}
+
 /* --- Competities (beker/Europa) --- */
 .ch-comps {
   grid-template-columns: 1fr 1fr;

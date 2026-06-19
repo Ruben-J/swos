@@ -233,6 +233,16 @@ export interface Season {
 /** Wekelijkse trainingsfocus: stuurt welke attributen sneller groeien. */
 export type TrainingFocus = "balanced" | "attack" | "defense" | "fitness" | "youth";
 
+/** Een baanaanbod van een andere club aan de manager (bij seizoensovergang). */
+export interface JobOffer {
+  teamId: UUID;
+  divisionId: UUID;
+  /** Aantrekkelijkheid 0..100 (clubreputatie/niveau). */
+  appeal: number;
+  /** Korte motivatietekst voor de UI. */
+  reason: string;
+}
+
 export interface CareerSave {
   id: UUID;
   profileName: string;
@@ -250,6 +260,8 @@ export interface CareerSave {
     achievements: string[];
     /** Wekelijkse trainingsfocus van de eigen club (default "balanced"). */
     trainingFocus?: TrainingFocus;
+    /** Openstaande baanaanbiedingen (na een seizoensovergang). */
+    pendingOffers?: JobOffer[];
   };
   worldState: {
     activeSeasonId: UUID;

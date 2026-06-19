@@ -6,9 +6,13 @@ import {
   canBuy,
   divisionStandings,
   formatShort,
+  acceptJobOffer,
+  declineJobOffers,
   knockoutChampion,
+  myYouthProspects,
   playMatchday,
   playerOverall,
+  potentialStars,
   seasonComplete,
   seasonObjective,
   sellPlayer,
@@ -43,7 +47,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const myDivision = ws.divisions.find((d) => d.id === myTeam.divisionId)!;
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
-  const [tab, setTab] = useState<"overzicht" | "selectie" | "transfers" | "competities">("overzicht");
+  const [tab, setTab] = useState<"overzicht" | "selectie" | "jeugd" | "transfers" | "competities">("overzicht");
 
   const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "";
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
@@ -87,6 +91,10 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
     onUpdate(s);
   };
 
+  const offers = save.manager.pendingOffers ?? [];
+  const acceptOffer = (teamId: UUID) => onUpdate(acceptJobOffer(structuredClone(save), teamId));
+  const declineOffers = () => onUpdate(declineJobOffers(structuredClone(save)));
+
   const promoCut = myDivision.tier > 1 ? myDivision.promotionSlots : 0;
   const relCut = myDivision.relegationSlots;
 
@@ -115,6 +123,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               onClick={() => setTab("selectie")}
             >
               Selectie
+            </button>
+            <button
+              className={`ch-tab${tab === "jeugd" ? " sel" : ""}`}
+              onClick={() => setTab("jeugd")}
+            >
+              Jeugd
             </button>
             <button
               className={`ch-tab${tab === "competities" ? " sel" : ""}`}
@@ -166,12 +180,33 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
         </div>
       )}
 
+      {tab === "jeugd" && <YouthView save={save} />}
+
       {tab === "competities" && <CompetitionsView save={save} />}
 
       {tab === "transfers" && <TransfersView save={save} onUpdate={onUpdate} />}
 
       <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
         <section className="ch-panel ch-next">
+          {offers.length > 0 && (
+            <div className="ch-offers">
+              <span className="ch-offers-title">📨 Baanaanbiedingen</span>
+              {offers.map((o) => (
+                <div key={o.teamId} className="ch-offer">
+                  <div className="ch-offer-club">
+                    <strong>{teamName(o.teamId)}</strong>
+                    <span className="ch-offer-reason">{o.reason}</span>
+                  </div>
+                  <button className="btn primary sm" onClick={() => acceptOffer(o.teamId)}>
+                    Tekenen
+                  </button>
+                </div>
+              ))}
+              <button className="ch-offer-decline" onClick={declineOffers}>
+                Aanbiedingen afslaan — blijf bij {myTeam.name}
+              </button>
+            </div>
+          )}
           <div className={`ch-objective${objective.met ? " ok" : " behind"}`}>
             <span className="ch-obj-label">Bestuursdoel</span>
             <span className="ch-obj-text">{objective.text}</span>
@@ -337,6 +372,49 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
       })}
       <td className="ch-pts">{ovr}</td>
     </tr>
+  );
+}
+
+/** Jeugdacademie: eigen talenten (t/m 19) met potentieel-inschatting. */
+function YouthView({ save }: { save: CareerSave }) {
+  const prospects = myYouthProspects(save);
+  return (
+    <div className="ch-body">
+      <section className="ch-panel ch-squad">
+        <h2>Jeugdacademie — {save.worldState.teams.find((t) => t.id === save.manager.currentTeamId)?.name}</h2>
+        {prospects.length === 0 ? (
+          <div className="ch-done">Geen jeugdspelers. Na elk seizoen komt er een nieuwe lichting.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th className="ch-tn">Naam</th>
+                <th>Pos</th>
+                <th>Lft</th>
+                <th>Nu</th>
+                <th title="Ingeschat potentieel">Potentieel</th>
+              </tr>
+            </thead>
+            <tbody>
+              {prospects.map((p) => {
+                const stars = potentialStars(p.hidden.potential);
+                return (
+                  <tr key={p.id}>
+                    <td className="ch-tn">{p.firstName[0]}. {p.lastName}</td>
+                    <td>{p.preferredPositions[0]}</td>
+                    <td>{p.ageYears}</td>
+                    <td className="ch-pts">{playerOverall(p)}</td>
+                    <td className="ch-stars" title={`${stars}/5`}>
+                      {"★".repeat(stars)}<span className="ch-stars-dim">{"★".repeat(5 - stars)}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
   );
 }
 

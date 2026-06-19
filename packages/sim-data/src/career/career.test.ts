@@ -12,6 +12,8 @@ import { seasonObjective } from "./board.js";
 import { knockoutChampion } from "./knockout.js";
 import { processTraining } from "./training.js";
 import { processAiTransfers } from "./aitransfers.js";
+import { myYouthProspects, potentialStars } from "./youth.js";
+import { acceptJobOffer, generateJobOffers, updateManagerReputation } from "./jobs.js";
 import { playerOverall } from "../world/squad.js";
 
 describe("fixtures", () => {
@@ -320,6 +322,81 @@ describe("training", () => {
     const shotA = a.worldState.players[idx]!.attributes.shooting;
     const shotB = b.worldState.players[idx]!.attributes.shooting;
     expect(shotA).toBeGreaterThan(shotB);
+  });
+});
+
+describe("jeugd", () => {
+  it("seizoensovergang levert een nieuwe jeugdlichting (16-18) per club", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+
+    // Speel het seizoen uit en ga naar het volgende.
+    const simRng = new Rng(1);
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 80) {
+      const m = save.worldState.matches.find((x) => x.state === "scheduled")!;
+      save = playMatchday(save, simRng, m.date);
+      guard++;
+    }
+    const before = save.worldState.players.length;
+    const { save: next } = advanceToNextSeason(save, new Rng(99));
+
+    expect(next.worldState.players.length).toBeGreaterThan(before);
+    // Eigen club heeft verse 16-18-jarigen.
+    const intake = next.worldState.players.filter(
+      (p) => p.teamId === myTeam.id && p.ageYears <= 18,
+    );
+    expect(intake.length).toBeGreaterThan(0);
+    expect(myYouthProspects(next).length).toBeGreaterThan(0);
+    // Elke jeugdspeler heeft één contract.
+    for (const p of intake) {
+      expect(next.worldState.contracts.filter((c) => c.playerId === p.id).length).toBe(1);
+    }
+  });
+
+  it("potentialStars zit tussen 1 en 5", () => {
+    expect(potentialStars(40)).toBe(1);
+    expect(potentialStars(99)).toBe(5);
+    expect(potentialStars(70)).toBeGreaterThanOrEqual(1);
+    expect(potentialStars(70)).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("job-offers", () => {
+  it("reputatie stijgt bij kampioenschap in tier 1", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const save = createCareer(world, { seed: 5, managerName: "T", teamId: world.teams[0]!.id });
+    const before = save.manager.reputation.result;
+    updateManagerReputation(save, 1, 16, 1);
+    expect(save.manager.reputation.result).toBeGreaterThan(before);
+    // Onderin tier 1 zakt de reputatie weer.
+    const save2 = createCareer(world, { seed: 6, managerName: "T", teamId: world.teams[0]!.id });
+    save2.manager.reputation.result = 80;
+    updateManagerReputation(save2, 16, 16, 1);
+    expect(save2.manager.reputation.result).toBeLessThan(80);
+  });
+
+  it("een hoog aangeschreven manager bij een kleine club krijgt aanbiedingen van betere clubs", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    // Kies een zwakke club (laagste rating in de wereld).
+    const weak = [...world.teams].sort(
+      (a, b) => (world.ratings.get(a.id) ?? 0) - (world.ratings.get(b.id) ?? 0),
+    )[0]!;
+    const save = createCareer(world, { seed: 5, managerName: "T", teamId: weak.id });
+    save.manager.reputation.result = 88;
+
+    const offers = generateJobOffers(save, new Rng(3));
+    expect(offers.length).toBeGreaterThan(0);
+    const myAppeal = weak.reputation.domestic;
+    for (const o of offers) expect(o.appeal).toBeGreaterThan(myAppeal);
+
+    // Aannemen verplaatst de manager naar de nieuwe club.
+    save.manager.pendingOffers = offers;
+    const target = offers[0]!.teamId;
+    acceptJobOffer(save, target);
+    expect(save.manager.currentTeamId).toBe(target);
+    expect(save.manager.pendingOffers).toEqual([]);
   });
 });
 

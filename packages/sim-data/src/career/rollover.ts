@@ -8,6 +8,8 @@ import {
 } from "@pitch/shared";
 import { buildCupsAndEuro, buildSeasonFixtures } from "../world/build.js";
 import { divisionStandings } from "./season.js";
+import { processYouthIntake } from "./youth.js";
+import { generateJobOffers, updateManagerReputation } from "./jobs.js";
 
 export interface PromotionMove {
   teamId: UUID;
@@ -47,6 +49,17 @@ export function advanceToNextSeason(
     const table = divisionStandings(save, div.id);
     finalTable.set(div.id, table.map((r) => r.teamId));
     if (table[0]) champions.push({ divisionId: div.id, teamId: table[0].teamId });
+  }
+
+  // Manager-reputatie bijwerken op de eigen eindklassering (vóór verplaatsing).
+  const myTeam = ws.teams.find((t) => t.id === save.manager.currentTeamId);
+  if (myTeam) {
+    const myDiv = ws.divisions.find((d) => d.id === myTeam.divisionId);
+    const order = finalTable.get(myTeam.divisionId) ?? [];
+    const rank = order.indexOf(myTeam.id) + 1;
+    if (myDiv && rank > 0) {
+      updateManagerReputation(save, rank, order.length, myDiv.tier);
+    }
   }
 
   // Promotie/degradatie per land, tussen tier t en t+1.
@@ -124,6 +137,12 @@ export function advanceToNextSeason(
   ws.matches.push(...matches);
   ws.seasons.push(season);
   ws.activeSeasonId = seasonId;
+
+  // Jeugdinstroom voor de hele wereld (nieuwe lichting per club).
+  processYouthIntake(save, rng, nextYear, nextYear);
+
+  // Baanaanbiedingen op basis van de bijgewerkte reputatie.
+  save.manager.pendingOffers = generateJobOffers(save, rng);
 
   return { save, rollover: { champions, moves } };
 }

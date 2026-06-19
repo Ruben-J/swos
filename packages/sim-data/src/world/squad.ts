@@ -71,10 +71,14 @@ export interface GenPlayerOpts {
   position: Position;
   firstName: string;
   lastName: string;
+  /** Vaste leeftijd (anders willekeurig 17..34). Voor jeugdspelers. */
+  age?: number;
+  /** Vast verborgen potentieel (anders afgeleid van `quality`). */
+  potential?: number;
 }
 
 export function generatePlayer(rng: Rng, teamId: string, opts: GenPlayerOpts): Player {
-  const age = rng.int(17, 34);
+  const age = opts.age ?? rng.int(17, 34);
   const birthYear = opts.refYear - age;
   const attributes = makeAttributes(rng, opts.position, opts.quality);
   const overall = 50; // herberekend door playerOverall waar nodig
@@ -91,7 +95,7 @@ export function generatePlayer(rng: Rng, teamId: string, opts: GenPlayerOpts): P
     foot: rng.chance(0.75) ? "R" : rng.chance(0.5) ? "L" : "B",
     attributes,
     hidden: {
-      potential: clamp(opts.quality * 100 + rng.range(-10, 20), 30, 99),
+      potential: opts.potential ?? clamp(opts.quality * 100 + rng.range(-10, 20), 30, 99),
       injuryProneness: rng.int(5, 60),
       professionalism: rng.int(30, 95),
       loyalty: rng.int(20, 90),
