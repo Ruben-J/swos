@@ -387,7 +387,7 @@ describe("opstelling/tactiek", () => {
     // Geen dubbele spelers.
     expect(new Set(setup.players.map((p) => p.id)).size).toBe(11);
     // Speelstijl uit de override (geclamped).
-    expect(setup.tactics.press).toBeCloseTo(0.85, 5);
+    expect(setup.tactics?.press).toBeCloseTo(0.85, 5);
 
     // Zonder override valt het terug op de automatische beste XI.
     const auto = toTeamSetup(team, players);

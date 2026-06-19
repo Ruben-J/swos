@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { Rng, hashSeed, type CareerSave, type Match, type Player, type TrainingFocus, type UUID } from "@pitch/shared";
 import { FORMATIONS } from "@pitch/engine";
 import {
@@ -463,6 +463,9 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
   const team = ws.teams.find((t) => t.id === myId)!;
   const squad = useMemo(() => ws.players.filter((p) => p.teamId === myId), [ws.players, myId]);
 
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [overSlot, setOverSlot] = useState<number | null>(null);
+
   const tac = save.manager.tactics;
   const formation = tac?.formation || teamFormationName(myId);
   const slots = FORMATIONS[formation] ?? FORMATIONS["4-4-2"]!;
@@ -515,11 +518,59 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
   const bench = squad
     .filter((p) => !starters.has(p.id))
     .sort((a, b) => playerOverall(b) - playerOverall(a));
-  const label = (p: Player): string => {
-    const st = statusLabel(p);
-    return `${p.preferredPositions[0]} · ${p.firstName[0]}. ${p.lastName} (${playerOverall(p)})${st ? ` ${st}` : ""}`;
-  };
   const playerById = (id: UUID): Player | undefined => squad.find((p) => p.id === id);
+
+  // Versleep spelers tussen slots onderling en tussen slot <-> bank.
+  const onDragStart = (src: string) => (e: DragEvent) => {
+    e.dataTransfer.setData("text/plain", src);
+    e.dataTransfer.effectAllowed = "move";
+    setDragging(src);
+  };
+  const allowDrop = (e: DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+  const apply = (src: string, target: { kind: "slot"; i: number } | { kind: "bench"; pid: UUID }) => {
+    if (src.startsWith("bench:")) {
+      const id = src.slice(6);
+      if (target.kind === "slot") setSlot(target.i, id);
+    } else if (src.startsWith("slot:")) {
+      const i = parseInt(src.slice(5), 10);
+      if (target.kind === "slot") {
+        const next = [...lineup];
+        const tmp = next[target.i]!;
+        next[target.i] = next[i]!;
+        next[i] = tmp;
+        write({ lineup: next });
+      } else {
+        setSlot(i, target.pid); // basisspeler ruilt met deze bankspeler
+      }
+    }
+  };
+  const dropOnSlot = (i: number) => (e: DragEvent) => {
+    e.preventDefault();
+    apply(e.dataTransfer.getData("text/plain"), { kind: "slot", i });
+    setDragging(null);
+    setOverSlot(null);
+  };
+  const dropOnBench = (pid: UUID) => (e: DragEvent) => {
+    e.preventDefault();
+    apply(e.dataTransfer.getData("text/plain"), { kind: "bench", pid });
+    setDragging(null);
+  };
+
+  const playerCard = (p: Player | undefined): ReactNode => {
+    if (!p) return <span className="tac-empty">leeg</span>;
+    const st = statusLabel(p);
+    return (
+      <>
+        <span className="tac-pc-pos">{p.preferredPositions[0]}</span>
+        <span className="tac-pc-name">{p.firstName[0]}. {p.lastName}</span>
+        {st && <span className="tac-pc-st">{st}</span>}
+        <span className="tac-pc-ovr">{playerOverall(p)}</span>
+      </>
+    );
+  };
 
   return (
     <div className="ch-body ch-tacticstab">
@@ -543,24 +594,29 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
           </div>
         </div>
 
-        <h3 className="ch-recent-title">Basiself</h3>
+        <h3 className="ch-recent-title">Basiself — sleep om te wisselen</h3>
         <ol className="tac-lineup">
           {slots.map((slot, i) => {
             const p = playerById(lineup[i] ?? "");
             const st = p ? statusLabel(p) : null;
             return (
-              <li key={i} className={st ? "tac-unavail" : ""}>
+              <li
+                key={i}
+                className={`${st ? "tac-unavail" : ""}${overSlot === i ? " tac-over" : ""}`}
+                onDragOver={allowDrop}
+                onDragEnter={() => setOverSlot(i)}
+                onDragLeave={() => setOverSlot((cur) => (cur === i ? null : cur))}
+                onDrop={dropOnSlot(i)}
+              >
                 <span className="tac-slot">{slot}</span>
-                <select
-                  className="cs-input tac-select"
-                  value={lineup[i] ?? ""}
-                  onChange={(e) => setSlot(i, e.target.value)}
+                <div
+                  className={`tac-pc${dragging === `slot:${i}` ? " tac-dragging" : ""}`}
+                  draggable
+                  onDragStart={onDragStart(`slot:${i}`)}
+                  onDragEnd={() => { setDragging(null); setOverSlot(null); }}
                 >
-                  {p && <option value={p.id}>{label(p)}</option>}
-                  {bench.map((b) => (
-                    <option key={b.id} value={b.id}>{label(b)}</option>
-                  ))}
-                </select>
+                  {playerCard(p)}
+                </div>
               </li>
             );
           })}
@@ -591,16 +647,25 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
             </div>
           ))}
         </div>
-        <h3 className="ch-recent-title">Reservebank</h3>
+        <h3 className="ch-recent-title">Reservebank — sleep naar een plek</h3>
         <ul className="tac-bench">
           {bench.map((p) => (
-            <li key={p.id}>
+            <li
+              key={p.id}
+              className={dragging === `bench:${p.id}` ? "tac-dragging" : ""}
+              draggable
+              onDragStart={onDragStart(`bench:${p.id}`)}
+              onDragEnd={() => { setDragging(null); setOverSlot(null); }}
+              onDragOver={allowDrop}
+              onDrop={dropOnBench(p.id)}
+            >
               <span className="tr-pos">{p.preferredPositions[0]}</span>
               <span className="tr-name">{p.firstName[0]}. {p.lastName}</span>
               <span className="ch-status">{statusLabel(p) ?? ""}</span>
               <span className="tr-ovr">{playerOverall(p)}</span>
             </li>
           ))}
+          {bench.length === 0 && <li className="ch-done">Geen reserves.</li>}
         </ul>
       </section>
     </div>
