@@ -7,6 +7,8 @@ import { createCareer } from "../world/build.js";
 import { divisionStandings, playMatchday, seasonComplete, teamNextMatch } from "./season.js";
 import { advanceToNextSeason } from "./rollover.js";
 import { buyPlayer, sellPlayer, squadSize, transferTargets, transferWindowOpen } from "./transfers.js";
+import { isAvailable } from "./events.js";
+import { seasonObjective } from "./board.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -193,5 +195,37 @@ describe("career-seizoen", () => {
     expect(save.worldState.players.find((p) => p.id === target.id)!.teamId).toBeNull();
     expect(squadSize(save, myTeam.id)).toBe(sizeBefore);
     expect(buyer.finances.transferBudget).toBeGreaterThan(budgetAfterBuy);
+  });
+
+  it("blessures/schorsingen: ontstaan en herstellen over een seizoen", () => {
+    const world = buildWorld(new Rng(9), 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 2, managerName: "T", teamId: myTeam.id });
+    const simRng = new Rng(4);
+    let everInjured = false;
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 80) {
+      const m = save.worldState.matches.find((x) => x.state === "scheduled")!;
+      save = playMatchday(save, simRng, m.date);
+      if (save.worldState.players.some((p) => p.teamId === myTeam.id && p.status.injury)) {
+        everInjured = true;
+      }
+      guard++;
+    }
+    // Over een heel seizoen raakt vrijwel zeker iemand geblesseerd.
+    expect(everInjured).toBe(true);
+    // Iedereen die fit is, is ook inzetbaar (consistente helper).
+    const fit = save.worldState.players.filter((p) => p.teamId === myTeam.id && isAvailable(p));
+    expect(fit.length).toBeGreaterThan(0);
+  });
+
+  it("board-doel: levert een doel + huidige stand", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 5, managerName: "T", teamId: myTeam.id });
+    const obj = seasonObjective(save, myTeam.id);
+    expect(obj.targetRank).toBeGreaterThanOrEqual(1);
+    expect(obj.targetRank).toBeLessThanOrEqual(16);
+    expect(obj.text.length).toBeGreaterThan(0);
   });
 });

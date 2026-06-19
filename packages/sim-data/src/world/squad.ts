@@ -216,7 +216,10 @@ function toMatchStats(p: Player): MatchPlayerStats {
 export function toTeamSetup(team: Team, players: Player[]): TeamSetup {
   const formationName = teamFormationName(team.id);
   const formation = (FORMATIONS[formationName] ?? FORMATIONS["4-4-2"]!) as Position[];
-  const pool = [...players].sort((a, b) => playerOverall(b) - playerOverall(a));
+  // Geblesseerde/geschorste spelers niet opstellen — tenzij er anders geen 11 zijn.
+  const fit = players.filter((p) => p.status.injury === null && p.status.suspensionMatchesRemaining === 0);
+  const usable = fit.length >= 11 ? fit : players;
+  const pool = [...usable].sort((a, b) => playerOverall(b) - playerOverall(a));
   const used = new Set<string>();
   const positionFit = (p: Player, slot: Position): number => {
     const pref = p.preferredPositions[0] ?? "CM";

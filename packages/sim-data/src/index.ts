@@ -10,3 +10,5 @@ export * from "./career/dates.js";
 export * from "./career/season.js";
 export * from "./career/rollover.js";
 export * from "./career/transfers.js";
+export * from "./career/events.js";
+export * from "./career/board.js";

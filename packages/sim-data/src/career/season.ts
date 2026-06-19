@@ -2,6 +2,7 @@ import { Rng, type CareerSave, type Match, type StandingRow, type UUID } from "@
 import { playerOverall } from "../world/squad.js";
 import { quickSimulate } from "./quicksim.js";
 import { computeStandings } from "./standings.js";
+import { processMatchdayEvents } from "./events.js";
 
 /** Bereken team-ratings (0..100) uit de spelers in de save. */
 export function buildRatings(save: CareerSave): Map<UUID, number> {
@@ -88,6 +89,9 @@ export function playMatchday(
       simulateMatch(rng, ratings, m);
     }
   }
+  // Blessures/schorsingen verwerken na de speeldag (herstel + nieuwe).
+  processMatchdayEvents(save, rng, save.manager.currentTeamId);
+
   // Seizoensdatum naar de eerstvolgende nog te spelen wedstrijd.
   const upcoming = save.worldState.matches
     .filter((m) => m.state === "scheduled")

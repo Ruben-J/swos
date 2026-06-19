@@ -9,8 +9,10 @@ import {
   playMatchday,
   playerOverall,
   seasonComplete,
+  seasonObjective,
   sellPlayer,
   squadSize,
+  statusLabel,
   teamNextMatch,
   transferTargets,
   transferWindowOpen,
@@ -37,6 +39,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
   const standings = useMemo(() => divisionStandings(save, myTeam.divisionId), [save, myTeam.divisionId]);
   const done = useMemo(() => seasonComplete(save), [save]);
+  const objective = useMemo(() => seasonObjective(save, myTeamId), [save, myTeamId]);
 
   const squad = useMemo(() => {
     const order: Record<string, number> = { GK: 0, RB: 1, CB: 2, LB: 3, DM: 4, CM: 5, AM: 6, RW: 7, LW: 8, ST: 9 };
@@ -121,6 +124,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
                   <th className="ch-tn">Naam</th>
                   <th>Pos</th>
                   <th>Lft</th>
+                  <th title="Beschikbaarheid">St</th>
                   {ATTR_COLS.map((c) => (
                     <th key={c.key} title={c.full}>
                       {c.label}
@@ -143,6 +147,13 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
 
       <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
         <section className="ch-panel ch-next">
+          <div className={`ch-objective${objective.met ? " ok" : " behind"}`}>
+            <span className="ch-obj-label">Bestuursdoel</span>
+            <span className="ch-obj-text">{objective.text}</span>
+            <span className="ch-obj-rank">
+              nu {objective.currentRank ?? "?"}e · doel ≤ {objective.targetRank}e
+            </span>
+          </div>
           <h2>Volgende wedstrijd</h2>
           {nextMatch ? (
             <>
@@ -279,6 +290,7 @@ function SquadRow({ p, ovr, num }: { p: Player; ovr: number; num: number }) {
       </td>
       <td>{p.preferredPositions[0]}</td>
       <td>{p.ageYears}</td>
+      <td className="ch-status">{statusLabel(p) ?? ""}</td>
       {ATTR_COLS.map((c) => {
         const v = a[c.key];
         return <td key={c.key}>{typeof v === "number" ? v : "-"}</td>;

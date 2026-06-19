@@ -735,6 +735,39 @@ kbd {
   padding: 0.3rem 0.7rem;
 }
 
+/* --- Board-doel + status --- */
+.ch-objective {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  margin-bottom: 0.9rem;
+  border-left: 3px solid var(--accent);
+  background: #14201a;
+}
+.ch-objective.behind {
+  border-left-color: #c0392b;
+  background: #1f1517;
+}
+.ch-obj-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ch-obj-text {
+  font-weight: 700;
+}
+.ch-obj-rank {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.ch-status {
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
 /* --- Quick match team picker --- */
 .qm-pickers {
   flex: 1;
