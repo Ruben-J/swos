@@ -2,7 +2,7 @@ import { BALL, PITCH, clamp, dist, distSq, len, normalize, type Vec2 } from "@pi
 import { projectBallPos } from "./ball.js";
 import type { BallState, PlayerEntity, Side } from "./types.js";
 import { attackingGoal, defendingGoal, dirTo, playerMaxSpeed } from "./player.js";
-import { DEFAULT_TACTICS, rolePressing, tacticalTarget, type TeamTactics } from "./tactics.js";
+import { DEFAULT_TACTICS, roleCategory, rolePressing, tacticalTarget, type TeamTactics } from "./tactics.js";
 
 /** Lathoogte (m) — gespiegeld aan CROSSBAR_HEIGHT in match.ts. */
 const CROSSBAR_HEIGHT = 2.44;
@@ -217,12 +217,34 @@ export function computeTeamPlan(
     phase = towardOwnGoal ? -0.5 : 0.1;
   }
 
+  // Zijn we in balbezit? Ook een eigen losse bal (net gepasst, even owner-loos)
+  // telt als bezit: dan vorm zoeken i.p.v. de eigen bal "pressen".
+  const inPossession = teamHasBall || (controlling === null && ball.lastTouchSide === side);
+
   const targets = new Map<string, Vec2>();
   const outfield: PlayerEntity[] = [];
   for (const p of players) {
     if (p.side !== side) continue;
     targets.set(p.id, tacticalTarget(p.anchor, p.position, side, ball.pos, phase, tactics));
     if (!p.isKeeper) outfield.push(p);
+  }
+
+  // Aansluiting: in balbezit blijft het blok kort ROND de bal. Een speler staat
+  // hoogstens een rolafhankelijke afstand vóór de bal (langs de aanvalsas), zodat
+  // de aanvalslinie niet wegloopt naar de buitenspellijn terwijl de bal nog
+  // achterin/op het middenveld rondgaat. De cap schuift mee als de bal opkomt.
+  if (inPossession) {
+    const attackDirX = side === "home" ? 1 : -1;
+    for (const p of outfield) {
+      const cat = roleCategory(p.position);
+      if (cat !== "attacker" && cat !== "midfielder") continue; // verdedigers: lineFloor
+      const aheadCap = cat === "attacker" ? 16 : 9;
+      const t = targets.get(p.id);
+      if (!t) continue;
+      const limitX = ball.pos.x + attackDirX * aheadCap;
+      const x = side === "home" ? Math.min(t.x, limitX) : Math.max(t.x, limitX);
+      if (x !== t.x) targets.set(p.id, { x, y: t.y });
+    }
   }
 
   // Buitenspel: houd de voorste spelers gelijk met de op-één-na-laatste
@@ -257,10 +279,34 @@ export function computeTeamPlan(
 
   void tick;
 
+  // Diepteloper: bij een VOORUIT gespeelde losse bal (steekpass — ook een schot
+  // dat als pass in de ruimte wordt gegeven, dus zonder targetId) wijst de ploeg
+  // de best geplaatste loper aan om er ACHTERAAN te gaan i.p.v. terug te zakken in
+  // vorm. Alleen lopers die vooruit (op de bal) lopen, niet wie terug zou moeten.
+  let runnerId: string | null = null;
+  if (controlling === null && ball.lastTouchSide === side && len(ball.vel) > 6) {
+    const attackDirX = side === "home" ? 1 : -1;
+    if (ball.vel.x * attackDirX > 4) {
+      let bestCost = Infinity;
+      for (const p of outfield) {
+        const speed = playerMaxSpeed(p.stats, true);
+        const ip = predictIntercept(ball, p.pos, speed);
+        if ((ip.x - p.pos.x) * attackDirX < -2) continue; // zou terug moeten komen
+        const t = dist(p.pos, ip) / Math.max(1, speed);
+        if (t < bestCost) {
+          bestCost = t;
+          runnerId = p.id;
+        }
+      }
+    }
+  }
+
   // Presser/cover bepalen op time-to-ball, gewogen met pressing-bereidheid.
+  // Niet als we zelf in bezit zijn (ook niet tijdens een eigen pass): dan loopt
+  // de ploeg niet achter de eigen bal aan maar zoekt ze positie.
   let presserId: string | null = null;
   let coverId: string | null = null;
-  if (!teamHasBall) {
+  if (!inPossession) {
     const ranked = outfield
       .map((p) => {
         const speed = playerMaxSpeed(p.stats, true);
@@ -278,7 +324,6 @@ export function computeTeamPlan(
   // dezelfde). Alleen tegenstanders rond de bal worden gedekt — daarbuiten houdt
   // de ploeg gewoon haar formatie. We dekken NIET als we zelf in bezit zijn —
   // ook niet tijdens een eigen pass (bal even owner-loos): dan formatie zoeken.
-  const inPossession = teamHasBall || (controlling === null && ball.lastTouchSide === side);
   const marks = new Map<string, string>();
   if (!inPossession) {
     const carrierId = ball.ownerId;
@@ -334,7 +379,7 @@ export function computeTeamPlan(
     }
   }
 
-  return { side, presserId, coverId, runnerId: null, marks, targets };
+  return { side, presserId, coverId, runnerId, marks, targets };
 }
 
 /**
@@ -400,6 +445,8 @@ export function computeAiCommand(
 
   // Losse bal (niemand bezit): dichtste man of presser jaagt de interceptie.
   const ballLoose = controlling === null && ball.z < 1.6;
+  // Eigen vooruit gespeelde losse bal (pass/steekpass/schot-als-pass).
+  const ourLoosePass = controlling === null && ball.lastTouchSide === player.side;
 
   if (ball.ownerId === player.id) {
     return onBallCommand(players, opponents, ball, player, myGoal);
@@ -413,14 +460,23 @@ export function computeAiCommand(
     return cmd;
   }
 
+  // Diepteloper op een steekpass/schot-in-de-ruimte: blijf DOORLOPEN op de bal
+  // (interceptiepunt vóór je), niet terugzakken in vorm. We blijven in de aanval.
+  if (player.id === plan.runnerId && controlling === null) {
+    const speed = playerMaxSpeed(player.stats, true);
+    moveTo(cmd, player, predictIntercept(ball, player.pos, speed), true);
+    return cmd;
+  }
+
   if (teamHasBall) {
     // Support: beweeg naar positionele target (al opgeschoven door de tactische laag).
     moveTo(cmd, player, target, dist(player.pos, ball.pos) > 24);
     return cmd;
   }
 
-  // Verdedigen / losse bal.
-  if (player.id === plan.presserId || (ballLoose && isClosestOutfield(players, player, ball.pos))) {
+  // Verdedigen / losse bal. Een eigen vooruit gespeelde bal laten we aan de
+  // aangewezen loper over (hierboven); anderen jagen 'm niet ook nog na.
+  if (player.id === plan.presserId || (ballLoose && !ourLoosePass && isClosestOutfield(players, player, ball.pos))) {
     const speed = playerMaxSpeed(player.stats, true);
     const owner = ball.ownerId;
     let aim: Vec2;

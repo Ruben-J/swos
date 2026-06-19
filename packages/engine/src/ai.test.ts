@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBall, kickBall } from "./ball.js";
-import { chooseBestPass, laneBlocked, predictIntercept } from "./ai.js";
+import { chooseBestPass, computeAiCommand, computeTeamPlan, laneBlocked, predictIntercept } from "./ai.js";
 import { tacticalTarget } from "./tactics.js";
 import type { MatchPlayerStats, PlayerEntity, Position, Side } from "./types.js";
 
@@ -109,5 +109,31 @@ describe("tacticalTarget", () => {
     const cbDef = tacticalTarget({ x: 20, y: 34 }, "CB", "home", { x: 30, y: 34 }, -0.6, t);
     // Spits blijft duidelijk hoger dan de verdediger -> opstellingen kruisen.
     expect(stDef.x).toBeGreaterThan(cbDef.x + 30);
+  });
+});
+
+describe("aansluiting & diepteloper", () => {
+  it("in balbezit blijft een aanvaller dicht bij de bal (loopt niet naar de buitenspellijn)", () => {
+    const ball = createBall({ x: 52, y: 34 }); // bal op het middenveld
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const st = pl("st", "home", 84, 34, "ST"); // anker diep
+    const cb = pl("cb", "home", 20, 34, "CB");
+    const plan = computeTeamPlan([gk, st, cb], ball, "home", "home");
+    const t = plan.targets.get("st")!;
+    // Aanvaller staat hoogstens ~16 vóór de bal i.p.v. ver vooruit op zijn anker.
+    expect(t.x).toBeLessThanOrEqual(52 + 16 + 0.001);
+  });
+
+  it("harde steekpass in de ruimte: de loper wordt aangewezen en loopt door (niet terug)", () => {
+    const ball = createBall({ x: 48, y: 34 });
+    kickBall(ball, { dir: { x: 1, y: 0 }, power: 38, byId: "p", bySide: "home" });
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const runner = pl("r", "home", 54, 34, "ST"); // net vóór de bal; bal raast erlangs
+    const back = pl("b", "home", 38, 34, "CM"); // achter de bal
+    const plan = computeTeamPlan([gk, runner, back], ball, "home", null);
+    expect(plan.runnerId).toBe("r");
+    const cmd = computeAiCommand([gk, runner, back], ball, runner, null, plan);
+    // Loopt VOORUIT op de bal (positieve x), komt niet terug richting eigen helft.
+    expect(cmd.move.x).toBeGreaterThan(0);
   });
 });
