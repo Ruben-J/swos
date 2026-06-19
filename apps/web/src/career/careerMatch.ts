@@ -1,6 +1,13 @@
 import type { MatchConfig } from "@pitch/engine";
-import { hashSeed, type CareerSave, type Match, type Player, type UUID } from "@pitch/shared";
-import { toTeamSetup, type World } from "@pitch/sim-data";
+import { hashSeed, type CareerSave, type ManagerTactics, type Match, type Player, type UUID } from "@pitch/shared";
+import { toTeamSetup, type TeamSetupOverride, type World } from "@pitch/sim-data";
+
+/** Vertaal de opgeslagen manager-tactiek naar een engine-setup-override.
+ *  Let op de veldnaam: ManagerTactics.formation -> TeamSetupOverride.formationName. */
+function toOverride(t: ManagerTactics | undefined): TeamSetupOverride | undefined {
+  if (!t) return undefined;
+  return { formationName: t.formation, lineup: t.lineup, shape: t.shape };
+}
 
 /** Snelle-match-config uit twee wereldteams (career-clubs), mens bestuurt thuis. */
 export function worldMatchConfig(world: World, homeId: UUID, awayId: UUID, seed: number): MatchConfig {
@@ -28,7 +35,7 @@ export function buildMatchConfig(save: CareerSave, match: Match, humanTeamId: UU
   const home = teamById(save, match.homeTeamId)!;
   const away = teamById(save, match.awayTeamId)!;
   // De door de manager gekozen opstelling/tactiek geldt voor zijn eigen club.
-  const mine = save.manager.tactics;
+  const mine = toOverride(save.manager.tactics);
   const homeSetup = toTeamSetup(home, playersOfTeam(save, home.id), home.id === humanTeamId ? mine : undefined);
   const awaySetup = toTeamSetup(away, playersOfTeam(save, away.id), away.id === humanTeamId ? mine : undefined);
   return {
