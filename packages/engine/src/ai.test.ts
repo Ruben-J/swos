@@ -158,3 +158,18 @@ describe("losse bal achterin", () => {
     expect(cmd.move.x).toBeLessThan(0);
   });
 });
+
+describe("opstappen / buitenspelval", () => {
+  it("dekker zakt niet diep mee met een aanvaller als de bal niet dichtbij is", () => {
+    const ball = createBall({ x: 50, y: 34 }); // bal ver van het eigen doel
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const presser = pl("pr", "home", 48, 34, "CM"); // dichtst bij de bal -> presser
+    const def = pl("d", "home", 18, 34, "CB"); // dekt de diepe aanvaller
+    const att = pl("a", "away", 20, 34, "ST"); // diepe aanvaller bij ons doel
+    const players = [gk, presser, def, att];
+    const plan = computeTeamPlan(players, ball, "home", "away");
+    const cmd = computeAiCommand(players, ball, def, "away", plan);
+    // Stapt mee op richting de linie (+x) i.p.v. diep bij de keeper te blijven.
+    expect(cmd.move.x).toBeGreaterThan(0);
+  });
+});

@@ -168,6 +168,8 @@ export interface TeamAiPlan {
   /** Mandekking: verdediger-id -> op te pakken tegenstander-id (max 1-op-1). */
   marks: Map<string, string>;
   targets: Map<string, Vec2>;
+  /** Huidige x van de verdedigende linie (opstap-/buitenspellijn) voor deze ploeg. */
+  lineX: number;
 }
 
 /** Verdedigende linie volgt de BAL (niet een losse diepe spits): schuift op als
@@ -275,11 +277,12 @@ export function computeTeamPlan(
     DEF_LINE_HARD_MIN,
     pushCap,
   );
+  const lineX = side === "home" ? lineFloor : PITCH.width - lineFloor;
   for (const p of players) {
     if (p.side !== side || p.isKeeper) continue;
     const t = targets.get(p.id);
     if (!t) continue;
-    const x = side === "home" ? Math.max(t.x, lineFloor) : Math.min(t.x, PITCH.width - lineFloor);
+    const x = side === "home" ? Math.max(t.x, lineX) : Math.min(t.x, lineX);
     if (x !== t.x) targets.set(p.id, { x, y: t.y });
   }
 
@@ -385,7 +388,7 @@ export function computeTeamPlan(
     }
   }
 
-  return { side, presserId, coverId, runnerId, marks, targets };
+  return { side, presserId, coverId, runnerId, marks, targets, lineX };
 }
 
 /**
@@ -548,7 +551,13 @@ export function computeAiCommand(
         // met wat ruimte. Niet achter de eigen doellijn/keeper.
         const gap = nearOwnGoal ? 2.4 : 4.5;
         const mx = man.pos.x + toGoal.x * gap;
-        const x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
+        let x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
+        // Opstappen / buitenspelval: ligt de bal NIET dichtbij, dan zakt de dekker
+        // niet dieper dan de verdedigende linie mee met een diepe aanvaller —
+        // hij stapt mee op zodat die aanvaller buitenspel komt en uit de box moet.
+        if (!nearOwnGoal) {
+          x = ownGoal.x === 0 ? Math.max(x, plan.lineX) : Math.min(x, plan.lineX);
+        }
         const mark: Vec2 = { x, y: man.pos.y + toGoal.y * gap };
         moveTo(cmd, player, mark, dist(player.pos, mark) > (nearOwnGoal ? 3 : 6));
       }
