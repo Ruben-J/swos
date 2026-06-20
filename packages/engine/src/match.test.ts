@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TICK_DT } from "@pitch/shared";
+import { PITCH, TICK_DT } from "@pitch/shared";
 import { MatchSim } from "./match.js";
 import { emptyIntent, type MatchConfig, type MatchPlayerSetup, type Position } from "./types.js";
 
@@ -370,5 +370,69 @@ describe("MatchSim", () => {
     expect(snap.matchMinute).toBeGreaterThanOrEqual(90);
     expect(snap.score.home).toBeGreaterThanOrEqual(0);
     expect(snap.score.away).toBeGreaterThanOrEqual(0);
+  });
+
+  it("bal kaatst van de paal terug het veld in (geen doelpunt)", () => {
+    const sim = new MatchSim({ ...makeConfig(5), humanSide: "home" });
+    const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };
+    let g = 0;
+    while (sim.snapshot().phase !== "play" && g < 4000) {
+      const s = sim.snapshot();
+      sim.step(TICK_DT, s.awaitingHumanRestart ? press : emptyIntent());
+      g++;
+    }
+    // Houd iedereen weg van het linkerdoel.
+    for (const p of sim.players) {
+      p.pos = { x: 60, y: 4 };
+      p.vel = { x: 0, y: 0 };
+    }
+    // Bal vlak vóór de linkerpaal, recht op de paal af (laag).
+    const postY = PITCH.height / 2 - PITCH.goalWidth / 2;
+    sim.ball.pos = { x: 0.5, y: postY };
+    sim.ball.z = 0;
+    sim.ball.vz = 0;
+    sim.ball.vel = { x: -12, y: 0 };
+    sim.ball.ownerId = null;
+    sim.ball.lastTouchId = "x";
+    sim.ball.sinceKick = 999;
+
+    sim.step(TICK_DT, emptyIntent());
+    const s1 = sim.snapshot();
+    expect(s1.phase).not.toBe("goal"); // niet erin: tegen de paal
+    expect(s1.ball.x).toBeGreaterThan(0.3); // buiten het doel gebleven
+    const x1 = s1.ball.x;
+    sim.step(TICK_DT, emptyIntent());
+    expect(sim.snapshot().ball.x).toBeGreaterThan(x1); // kaatst het veld weer in
+  });
+
+  it("bal van de binnenkant van de paal gaat alsnog het doel in", () => {
+    const sim = new MatchSim({ ...makeConfig(5), humanSide: "home" });
+    const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };
+    let g = 0;
+    while (sim.snapshot().phase !== "play" && g < 4000) {
+      const s = sim.snapshot();
+      sim.step(TICK_DT, s.awaitingHumanRestart ? press : emptyIntent());
+      g++;
+    }
+    for (const p of sim.players) {
+      p.pos = { x: 60, y: 4 };
+      p.vel = { x: 0, y: 0 };
+    }
+    // Bal net binnen de paal, schuin naar het doel: raakt de binnenkant en gaat door.
+    const postY = PITCH.height / 2 - PITCH.goalWidth / 2;
+    sim.ball.pos = { x: 0.8, y: postY + 0.3 };
+    sim.ball.z = 0;
+    sim.ball.vz = 0;
+    sim.ball.vel = { x: -16, y: 1.5 }; // naar de doellijn, licht het doel in
+    sim.ball.ownerId = null;
+    sim.ball.lastTouchId = "x";
+    sim.ball.sinceKick = 999;
+
+    let scored = false;
+    for (let i = 0; i < 12 && !scored; i++) {
+      sim.step(TICK_DT, emptyIntent());
+      if (sim.snapshot().phase === "goal") scored = true;
+    }
+    expect(scored).toBe(true);
   });
 });

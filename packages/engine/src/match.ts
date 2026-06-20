@@ -461,6 +461,7 @@ export class MatchSim {
 
     // Balfysica + botsingen.
     stepBall(this.ball, dt);
+    this.resolvePostCollisions();
     this.resolveBallPlayerCollisions();
     this.keeperSaves();
     if (!this.checkGoal()) {
@@ -1192,6 +1193,45 @@ export class MatchSim {
   }
 
   /** Doelpuntdetectie. Returnt true als er gescoord is. */
+  /**
+   * Botsing van de bal tegen de doelpalen. Elke paal is een dunne verticale
+   * cilinder op een hoek van het doel; staat de bal lager dan de lat, dan kaatst
+   * hij om de normaal (paal -> bal) terug. De inkomende HOEK bepaalt zo vanzelf
+   * of de bal van de binnenkant alsnog het doel in gaat of het veld weer in.
+   */
+  private resolvePostCollisions(): void {
+    if (this.ball.z >= CROSSBAR_HEIGHT) return; // over de lat: geen paal meer
+    const cy = PITCH.height / 2;
+    const halfG = PITCH.goalWidth / 2;
+    const postR = 0.12; // straal van de paal
+    const hitR = postR + BALL.radius;
+    const posts: Vec2[] = [
+      { x: 0, y: cy - halfG },
+      { x: 0, y: cy + halfG },
+      { x: PITCH.width, y: cy - halfG },
+      { x: PITCH.width, y: cy + halfG },
+    ];
+    for (const post of posts) {
+      const dx = this.ball.pos.x - post.x;
+      const dy = this.ball.pos.y - post.y;
+      const d = Math.hypot(dx, dy);
+      if (d >= hitR || d < 1e-4) continue;
+      const nx = dx / d;
+      const ny = dy / d;
+      // Zet de bal op contactafstand buiten de paal.
+      this.ball.pos.x = post.x + nx * hitR;
+      this.ball.pos.y = post.y + ny * hitR;
+      // Reflecteer alleen de naar de paal toe gerichte snelheidscomponent.
+      const vn = this.ball.vel.x * nx + this.ball.vel.y * ny;
+      if (vn < 0) {
+        const rest = 0.7; // energieverlies bij de kaats
+        this.ball.vel.x -= (1 + rest) * vn * nx;
+        this.ball.vel.y -= (1 + rest) * vn * ny;
+        this.ball.curve *= 0.4;
+      }
+    }
+  }
+
   private checkGoal(): boolean {
     const y = this.ball.pos.y;
     const withinPosts =
