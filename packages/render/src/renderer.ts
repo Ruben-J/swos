@@ -265,14 +265,14 @@ export class MatchRenderer {
     g.clear();
     // Romp/schouders (breder dwars op de kijkrichting). +x = kijkrichting.
     g.ellipse(-0.3, 0, 4.1, 4.8).fill(shirt).stroke({ width: 1.2, color: 0x101010, alpha: 0.8 });
-    // Shirtpatroon (binnen de romp-ellips, dus geen overloop). Verticale banden
-    // (dwars op de kijkrichting) in de accentkleur.
+    // Shirtpatroon (binnen de romp-ellips). Verticale strepen = banden langs de
+    // lengte-as van het shirt (de kijkrichting), gespreid over de breedte.
     if (pattern === "centre") {
-      g.ellipse(-0.3, 0, 0.95, 4.3).fill(accent);
+      g.ellipse(-0.3, 0, 4.0, 0.95).fill(accent);
     } else if (pattern === "stripes") {
-      for (const d of [-2.4, -1.2, 0, 1.2, 2.4]) {
-        const ry = 4.3 * Math.sqrt(Math.max(0, 1 - (d / 3.9) ** 2));
-        g.ellipse(-0.3 + d, 0, 0.42, ry).fill(accent);
+      for (const d of [-2.7, -1.35, 0, 1.35, 2.7]) {
+        const rx = 4.0 * Math.sqrt(Math.max(0, 1 - (d / 4.6) ** 2));
+        g.ellipse(-0.3, d, rx, 0.38).fill(accent);
       }
     }
     // Korte broek-hint achteraan.
