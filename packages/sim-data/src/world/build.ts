@@ -115,7 +115,7 @@ function makeTeam(
       trim: seed.colors[1],
       goalkeeperPrimary: "#1c1c1c",
     },
-    kits: makeKits(teamId, seed.colors[0], seed.colors[1]),
+    kits: makeKits(teamId, seed.colors[0], seed.colors[1], seed.pattern),
     stadium: {
       name: `${seed.city} Arena`,
       capacity: Math.round(clamp(seed.strength * 60_000 + rng.range(4_000, 12_000), 6_000, 82_000)),

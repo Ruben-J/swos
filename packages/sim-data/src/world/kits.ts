@@ -28,9 +28,14 @@ function patternFrom(h: number): KitPattern {
  * (wit bij een donker shirt, donkerblauw bij een licht shirt) met de clubkleur
  * als accent. Patroon per tenue deterministisch uit het team-id.
  */
-export function makeKits(idHash: string, primary: string, secondary: string): { home: Kit; away: Kit } {
+export function makeKits(
+  idHash: string,
+  primary: string,
+  secondary: string,
+  homePattern?: KitPattern,
+): { home: Kit; away: Kit } {
   const h = hash(idHash);
-  const home: Kit = { primary, secondary, pattern: patternFrom(h) };
+  const home: Kit = { primary, secondary, pattern: homePattern ?? patternFrom(h) };
   const awayPrimary = luminance(primary) < 0.5 ? "#eef1f4" : "#1b2330";
   const away: Kit = { primary: awayPrimary, secondary: primary, pattern: patternFrom(h >>> 5) };
   return { home, away };

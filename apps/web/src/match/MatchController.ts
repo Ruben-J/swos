@@ -13,7 +13,7 @@ import { PITCH } from "@pitch/shared";
 export type HudListener = (snap: MatchSnapshot) => void;
 
 /** Camera-inzoomfactor (1 = heel veld, hoger = ingezoomde tv-shot). */
-const MATCH_ZOOM = 1.55;
+const MATCH_ZOOM = 1.8;
 
 /**
  * Bindt de pure engine aan de browser: maakt sim + renderer + camera + input,
