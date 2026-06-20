@@ -20,6 +20,7 @@ import { processTraining } from "./training.js";
 import { processAiTransfers } from "./aitransfers.js";
 import { myYouthProspects, potentialStars } from "./youth.js";
 import { acceptJobOffer, generateJobOffers, updateManagerReputation } from "./jobs.js";
+import { pickAwayKitSide } from "../world/kits.js";
 import { playerOverall, toTeamSetup } from "../world/squad.js";
 
 describe("fixtures", () => {
@@ -527,5 +528,24 @@ describe("tenues (kits)", () => {
     expect(home.colorPrimary).toBe(team.kits!.home.primary);
     expect(away.colorPrimary).toBe(team.kits!.away.primary);
     expect(home.pattern).toBe(team.kits!.home.pattern);
+  });
+});
+
+describe("kit-botsing", () => {
+  it("uitploeg switcht van tenue als de uitkit te veel op het thuisshirt lijkt", () => {
+    const home = { colors: { primary: "#ffffff", secondary: "#000000" },
+      kits: { home: { primary: "#ffffff", secondary: "#000000", pattern: "plain" as const },
+              away: { primary: "#102040", secondary: "#ffffff", pattern: "plain" as const } } };
+    // Uitploeg met een (bijna) wit uittenue -> botst met wit thuisshirt.
+    const away = { colors: { primary: "#1b2330", secondary: "#ffd200" },
+      kits: { home: { primary: "#1b2330", secondary: "#ffd200", pattern: "stripes" as const },
+              away: { primary: "#f2f4f6", secondary: "#1b2330", pattern: "plain" as const } } };
+    expect(pickAwayKitSide(home, away)).toBe("home"); // pakt zijn donkere thuiskit
+
+    // Geen botsing: rood thuis vs wit uit -> gewoon de uitkit.
+    const homeRed = { colors: { primary: "#da291c", secondary: "#fff" },
+      kits: { home: { primary: "#da291c", secondary: "#fff", pattern: "plain" as const },
+              away: { primary: "#222", secondary: "#da291c", pattern: "plain" as const } } };
+    expect(pickAwayKitSide(homeRed, away)).toBe("away");
   });
 });

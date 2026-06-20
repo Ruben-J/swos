@@ -45,3 +45,34 @@ export function kitFor(
   // Oudere saves zonder kits: leid ze af uit de clubkleuren.
   return makeKits(team.colors.primary + team.colors.secondary, team.colors.primary, team.colors.secondary)[side];
 }
+
+function rgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+/** Kleurafstand 0..~441 (euclidisch in RGB). */
+function colorDistance(a: string, b: string): number {
+  const [r1, g1, b1] = rgb(a);
+  const [r2, g2, b2] = rgb(b);
+  return Math.hypot(r1 - r2, g1 - g2, b1 - b2);
+}
+
+/** Onder deze afstand lijken twee shirts te veel op elkaar (kleurbotsing). */
+const CLASH_THRESHOLD = 100;
+
+type KitTeam = { kits?: { home: Kit; away: Kit }; colors: { primary: string; secondary: string } };
+
+/**
+ * Kies het tenue van de UITploeg tegen een gegeven thuisploeg. Normaal de uitkit,
+ * maar botst die te veel met het thuisshirt, dan switcht de uitploeg naar zijn
+ * andere tenue als dat duidelijker contrasteert.
+ */
+export function pickAwayKitSide(homeTeam: KitTeam, awayTeam: KitTeam): "home" | "away" {
+  const homeShirt = kitFor(homeTeam, "home").primary;
+  const awayKit = kitFor(awayTeam, "away").primary;
+  if (colorDistance(homeShirt, awayKit) >= CLASH_THRESHOLD) return "away";
+  // Botsing: pak het tenue (van de twee) dat het verst van het thuisshirt ligt.
+  const altKit = kitFor(awayTeam, "home").primary;
+  return colorDistance(homeShirt, altKit) > colorDistance(homeShirt, awayKit) ? "home" : "away";
+}
