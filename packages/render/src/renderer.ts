@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import { PITCH, lerp } from "@pitch/shared";
+import { PITCH, clamp, lerp } from "@pitch/shared";
 import type { CameraView, MatchSnapshot, MatchSnapshotPlayer } from "@pitch/engine";
 
 const PX_PER_UNIT = 11;
@@ -37,6 +37,13 @@ export class MatchRenderer {
   // Net-animatie: actieve inslag + welk doelpunt (seq) al getoond is.
   private lastGoalSeq = 0;
   private netWobble: { goalX: number; s0: number; intensity: number; t0: number } | null = null;
+  // Cosmetische officials: scheidsrechter + 2 grensrechters (geen sim-rol).
+  private officials: {
+    kind: "ref" | "lineA" | "lineB";
+    container: Container;
+    body: Graphics;
+    pos: { x: number; y: number };
+  }[] = [];
   // Rol-animatie van de bal: afgelegde afstand + laatste looprichting.
   private ballRoll = 0;
   private lastBallScreen: { x: number; y: number } | null = null;
@@ -276,6 +283,88 @@ export class MatchRenderer {
     this.drawGoalNet(g, PITCH.width, 1, goalX === PITCH.width ? bulge : 0, s0);
   }
 
+  /** Klein official-spritetje (scheids/grensrechter), kop wijst naar +x. */
+  private drawOfficialSprite(g: Graphics, shirt: number): void {
+    g.clear();
+    g.ellipse(-0.2, 0, 3.4, 4.0).fill(shirt).stroke({ width: 1, color: 0x101010, alpha: 0.85 });
+    g.ellipse(-1.8, 0, 1.4, 2.7).fill({ color: 0x20242b, alpha: 0.5 });
+    g.circle(0.8, 0, 2.1).fill(0x2e2018).stroke({ width: 0.8, color: 0x101010, alpha: 0.7 });
+    g.circle(1.6, 0, 1.35).fill(0xe6b48c);
+  }
+
+  private ensureOfficials(): void {
+    if (this.officials.length) return;
+    const cx = PITCH.width / 2;
+    const cy = PITCH.height / 2;
+    const make = (kind: "ref" | "lineA" | "lineB", color: number, x: number, y: number) => {
+      const container = new Container();
+      const body = new Graphics();
+      this.drawOfficialSprite(body, color);
+      container.addChild(body);
+      this.world.addChild(container);
+      this.officials.push({ kind, container, body, pos: { x, y } });
+    };
+    make("ref", 0x18181a, cx, cy); // scheidsrechter (zwart)
+    make("lineA", 0xe6c200, cx, -1.4); // grensrechter bovenlijn (geel)
+    make("lineB", 0xe6c200, cx, PITCH.height + 1.4); // grensrechter onderlijn
+  }
+
+  /**
+   * Plaats de cosmetische official-sprites op basis van de snapshot. De scheids
+   * volgt het spel rond het midden, blijft uit de strafschopgebieden en bij de
+   * bal vandaan; de grensrechters lopen aan de zijlijn mee met de achterste
+   * veldspeler van de kant waarvoor ze vlaggen. Posities worden gladgestreken
+   * zodat ze "lopen" i.p.v. springen.
+   */
+  private updateOfficials(snap: MatchSnapshot): void {
+    this.ensureOfficials();
+    const u = PX_PER_UNIT;
+    const W = PITCH.width;
+    const H = PITCH.height;
+    const cx = W / 2;
+    const cy = H / 2;
+    const box = PITCH.penaltyBoxDepth; // 16.5
+
+    // Scheidsrechter: volgt de bal met sterke midden-bias, buiten de boxen.
+    const bx = snap.ball.x;
+    const by = snap.ball.y;
+    let rx = clamp(bx * 0.6 + cx * 0.4, box + 3, W - box - 3);
+    let ry = clamp(by * 0.7 + cy * 0.3, 6, H - 6);
+    // Niet bovenop de bal: duw weg tot een paar meter.
+    let dx = rx - bx;
+    let dy = ry - by;
+    let d = Math.hypot(dx, dy);
+    if (d < 5) {
+      if (d < 0.001) {
+        dx = -3;
+        dy = 3;
+        d = Math.hypot(dx, dy);
+      }
+      rx = clamp(bx + (dx / d) * 5, box + 3, W - box - 3);
+      ry = clamp(by + (dy / d) * 5, 6, H - 6);
+    }
+
+    // Grensrechters: achterste veldspeler (geen keeper) van de verdedigende kant.
+    const homeOut = snap.players.filter((p) => p.side === "home" && !p.isKeeper);
+    const awayOut = snap.players.filter((p) => p.side === "away" && !p.isKeeper);
+    const homeDeep = homeOut.length ? Math.min(...homeOut.map((p) => p.x)) : cx;
+    const awayDeep = awayOut.length ? Math.max(...awayOut.map((p) => p.x)) : cx;
+
+    const targets: Record<string, { x: number; y: number; face: number }> = {
+      ref: { x: rx, y: ry, face: Math.atan2(by - ry, bx - rx) },
+      lineA: { x: clamp(homeDeep, 4, cx), y: -1.4, face: Math.PI / 2 },
+      lineB: { x: clamp(awayDeep, cx, W - 4), y: H + 1.4, face: -Math.PI / 2 },
+    };
+
+    for (const o of this.officials) {
+      const t = targets[o.kind]!;
+      o.pos.x += (t.x - o.pos.x) * 0.06;
+      o.pos.y += (t.y - o.pos.y) * 0.06;
+      o.container.position.set(o.pos.x * u, o.pos.y * u);
+      o.body.rotation = t.face;
+    }
+  }
+
   private ensurePlayer(p: MatchSnapshotPlayer): PlayerNode {
     let node = this.players.get(p.id);
     if (node) return node;
@@ -352,6 +441,8 @@ export class MatchRenderer {
 
     // Doelnetten (incl. eventuele goal-wobble) elk frame opnieuw.
     this.drawNets(snap);
+    // Cosmetische scheids + grensrechters.
+    this.updateOfficials(snap);
 
     const prev = this.prev;
     const prevById = new Map(prev?.players.map((p) => [p.id, p]));
