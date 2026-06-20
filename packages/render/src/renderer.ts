@@ -1,5 +1,5 @@
 import { Application, Container, Graphics } from "pixi.js";
-import { PITCH, clamp, lerp } from "@pitch/shared";
+import { PITCH, PLAYER, clamp, lerp } from "@pitch/shared";
 import type { CameraView, MatchSnapshot, MatchSnapshotPlayer } from "@pitch/engine";
 
 const PX_PER_UNIT = 11;
@@ -37,6 +37,10 @@ export class MatchRenderer {
   // Net-animatie: actieve inslag + welk doelpunt (seq) al getoond is.
   private lastGoalSeq = 0;
   private netWobble: { goalX: number; s0: number; intensity: number; t0: number } | null = null;
+  // Traag meebewegend richtpunt voor de scheids (lagt de bal, niet er direct aan
+  // gekoppeld) + tijdstempel vorige frame voor dt-gebaseerde loopsnelheid.
+  private refAnchor: { x: number; y: number } | null = null;
+  private lastOfficialNow = 0;
   // Cosmetische officials: scheidsrechter + 2 grensrechters (geen sim-rol).
   private officials: {
     kind: "ref" | "lineA" | "lineB";
@@ -353,24 +357,23 @@ export class MatchRenderer {
     const cy = H / 2;
     const box = PITCH.penaltyBoxDepth; // 16.5
 
-    // Scheidsrechter: volgt de bal met sterke midden-bias, buiten de boxen.
+    // dt (s) voor frame-onafhankelijke loopsnelheid; geklemd tegen sprongen.
+    const now = performance.now();
+    const dt = this.lastOfficialNow ? Math.min(0.05, (now - this.lastOfficialNow) / 1000) : 0.016;
+    this.lastOfficialNow = now;
+    const walk = PLAYER.baseSpeed * dt; // zelfde wandel/loop-snelheid als spelers, geen sprint
+
+    // Richtpunt scheids: een TRAAG meebewegend anker dat de bal lagt — zo schiet
+    // hij niet mee als de bal hard wordt gespeeld, maar drentelt hij ernaartoe.
     const bx = snap.ball.x;
     const by = snap.ball.y;
-    let rx = clamp(bx * 0.6 + cx * 0.4, box + 3, W - box - 3);
-    let ry = clamp(by * 0.7 + cy * 0.3, 6, H - 6);
-    // Niet bovenop de bal: duw weg tot een paar meter.
-    let dx = rx - bx;
-    let dy = ry - by;
-    let d = Math.hypot(dx, dy);
-    if (d < 5) {
-      if (d < 0.001) {
-        dx = -3;
-        dy = 3;
-        d = Math.hypot(dx, dy);
-      }
-      rx = clamp(bx + (dx / d) * 5, box + 3, W - box - 3);
-      ry = clamp(by + (dy / d) * 5, 6, H - 6);
-    }
+    if (!this.refAnchor) this.refAnchor = { x: bx, y: by };
+    const ease = Math.min(1, dt * 1.4); // tijdconstante ~0.7s
+    this.refAnchor.x += (bx - this.refAnchor.x) * ease;
+    this.refAnchor.y += (by - this.refAnchor.y) * ease;
+    // Gewenste positie: bij het (gelagde) spel, sterke midden-bias, buiten de boxen.
+    const rx = clamp(this.refAnchor.x * 0.55 + cx * 0.45, box + 3, W - box - 3);
+    const ry = clamp(this.refAnchor.y * 0.6 + cy * 0.4, 6, H - 6);
 
     // Grensrechters: achterste veldspeler (geen keeper) van de verdedigende kant.
     const homeOut = snap.players.filter((p) => p.side === "home" && !p.isKeeper);
@@ -379,11 +382,11 @@ export class MatchRenderer {
     const awayDeep = awayOut.length ? Math.max(...awayOut.map((p) => p.x)) : cx;
 
     // Doel + vaste kijkrichting (grensrechters kijken het veld in en blijven dat
-    // doen; de scheids krijgt zijn richting uit de LOOPbeweging, niet uit de bal).
-    const targets: Record<string, { x: number; y: number; face: number | null; step: number }> = {
-      ref: { x: rx, y: ry, face: null, step: 0.16 }, // ~9.6 u/s loop/jog
-      lineA: { x: clamp(homeDeep, 4, cx), y: -1.4, face: Math.PI / 2, step: 0.2 },
-      lineB: { x: clamp(awayDeep, cx, W - 4), y: H + 1.4, face: -Math.PI / 2, step: 0.2 },
+    // doen; de scheids krijgt zijn richting uit de LOOPbeweging).
+    const targets: Record<string, { x: number; y: number; face: number | null }> = {
+      ref: { x: rx, y: ry, face: null },
+      lineA: { x: clamp(homeDeep, 4, cx), y: -1.4, face: Math.PI / 2 },
+      lineB: { x: clamp(awayDeep, cx, W - 4), y: H + 1.4, face: -Math.PI / 2 },
     };
 
     for (const o of this.officials) {
@@ -392,13 +395,12 @@ export class MatchRenderer {
       const dys = t.y - o.pos.y;
       const dist = Math.hypot(dxs, dys);
       if (dist > 0.001) {
-        const move = Math.min(dist, t.step); // gecapte stap = natuurlijke loopsnelheid
+        const move = Math.min(dist, walk); // nooit sneller dan een speler loopt
         const nx = dxs / dist;
         const ny = dys / dist;
         o.pos.x += nx * move;
         o.pos.y += ny * move;
-        // Kijkrichting volgt de beweging (scheids), tenzij vast (grensrechters).
-        if (t.face === null && move > 0.04) o.facing = Math.atan2(ny, nx);
+        if (t.face === null && move > walk * 0.25) o.facing = Math.atan2(ny, nx);
       }
       if (t.face !== null) o.facing = t.face;
       o.container.position.set(o.pos.x * u, o.pos.y * u);
