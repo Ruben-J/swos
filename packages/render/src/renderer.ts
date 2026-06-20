@@ -286,11 +286,12 @@ export class MatchRenderer {
 
   /** Klein official-spritetje (scheids/grensrechter), kop wijst naar +x. */
   private drawOfficialSprite(g: Graphics, shirt: number): void {
+    // Zelfde maat als een speler-sprite (drawPlayerSprite).
     g.clear();
-    g.ellipse(-0.2, 0, 3.4, 4.0).fill(shirt).stroke({ width: 1, color: 0x101010, alpha: 0.85 });
-    g.ellipse(-1.8, 0, 1.4, 2.7).fill({ color: 0x20242b, alpha: 0.5 });
-    g.circle(0.8, 0, 2.1).fill(0x2e2018).stroke({ width: 0.8, color: 0x101010, alpha: 0.7 });
-    g.circle(1.6, 0, 1.35).fill(0xe6b48c);
+    g.ellipse(-0.3, 0, 4.1, 4.8).fill(shirt).stroke({ width: 1.2, color: 0x101010, alpha: 0.8 });
+    g.ellipse(-2.3, 0, 1.9, 3.5).fill({ color: 0x20242b, alpha: 0.55 });
+    g.circle(1.0, 0, 2.6).fill(0x2e2018).stroke({ width: 0.9, color: 0x101010, alpha: 0.7 });
+    g.circle(2.0, 0, 1.7).fill(0xe6b48c);
   }
 
   /** Officialkleur die het meest contrasteert met beide teamshirts (felle kit,
