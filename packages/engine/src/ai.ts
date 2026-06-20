@@ -398,6 +398,15 @@ export function computeTeamPlan(
     }
   }
 
+  // Houd alle doelposities binnen de lijnen (vrijlopen/aansluiting mag spelers
+  // niet het veld af sturen). De keeper mag wel tot op zijn doellijn.
+  for (const [id, t] of targets) {
+    targets.set(id, {
+      x: clamp(t.x, 0.5, PITCH.width - 0.5),
+      y: clamp(t.y, 0.5, PITCH.height - 0.5),
+    });
+  }
+
   return { side, presserId, coverId, runnerId, marks, targets, lineX };
 }
 

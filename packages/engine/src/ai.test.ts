@@ -207,3 +207,22 @@ describe("vrijlopen", () => {
     expect(cmd.move.y).toBeLessThan(0);
   });
 });
+
+describe("binnen de lijnen", () => {
+  it("alle doelposities van het teamplan blijven binnen het veld", () => {
+    const ball = createBall({ x: 90, y: 2 }); // bal in de hoek
+    ball.ownerId = "w";
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const w = pl("w", "home", 88, 4, "LW"); // baldrager bij de zijlijn
+    const st = pl("st", "home", 92, 64, "ST"); // andere flank, diep
+    const cb = pl("cb", "home", 30, 34, "CB");
+    const opp = pl("o", "away", 89, 3, "RB"); // dekker tegen de zijlijn
+    const plan = computeTeamPlan([gk, w, st, cb, opp], ball, "home", "home");
+    for (const [, t] of plan.targets) {
+      expect(t.x).toBeGreaterThanOrEqual(0);
+      expect(t.x).toBeLessThanOrEqual(105);
+      expect(t.y).toBeGreaterThanOrEqual(0);
+      expect(t.y).toBeLessThanOrEqual(68);
+    }
+  });
+});

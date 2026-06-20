@@ -47,6 +47,7 @@ const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
 const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
 const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
+const PLAYER_OOB = 0.6; // u dat een speler hoogstens buiten de lijnen mag komen
 const WALKOUT_DURATION = 6.0; // s waarin de spelers vanaf de middenlijn opkomen
 const WALKOUT_WALK_SPEED = 9.0; // u/s wandeltempo tijdens de opkomst
 
@@ -649,8 +650,9 @@ export class MatchSim {
         p.pos.x += p.vel.x * dt;
         p.pos.y += p.vel.y * dt;
       }
-      p.pos.x = clamp(p.pos.x, -PITCH.margin, PITCH.width + PITCH.margin);
-      p.pos.y = clamp(p.pos.y, -PITCH.margin, PITCH.height + PITCH.margin);
+      // Spelers blijven nagenoeg binnen de lijnen (alleen de bal mag echt uit).
+      p.pos.x = clamp(p.pos.x, -PLAYER_OOB, PITCH.width + PLAYER_OOB);
+      p.pos.y = clamp(p.pos.y, -PLAYER_OOB, PITCH.height + PLAYER_OOB);
       // Keeper blijft ook tijdens de duik naar de bal kijken (duik = zijwaarts).
       p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
       p.stateTimer = Math.max(0, p.stateTimer - dt);
