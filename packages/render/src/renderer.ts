@@ -43,6 +43,7 @@ export class MatchRenderer {
     container: Container;
     body: Graphics;
     pos: { x: number; y: number };
+    facing: number;
   }[] = [];
   // Rol-animatie van de bal: afgelegde afstand + laatste looprichting.
   private ballRoll = 0;
@@ -292,21 +293,47 @@ export class MatchRenderer {
     g.circle(1.6, 0, 1.35).fill(0xe6b48c);
   }
 
+  /** Officialkleur die het meest contrasteert met beide teamshirts (felle kit,
+   *  lijkt nooit op een teamgenoot — als een team zwart is, dragen ze neongeel). */
+  private pickOfficialColor(): number {
+    const palette = [0xe6ff00, 0xff6a00, 0xff1493, 0x14ff5a, 0x00e5ff];
+    const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const dist = (a: number, b: number): number => {
+      const [r1, g1, b1] = rgb(a);
+      const [r2, g2, b2] = rgb(b);
+      return Math.hypot(r1 - r2, g1 - g2, b1 - b2);
+    };
+    const home = hexToNum(this.colors.home.primary);
+    const away = hexToNum(this.colors.away.primary);
+    let best = palette[0]!;
+    let bestScore = -1;
+    for (const c of palette) {
+      const s = Math.min(dist(c, home), dist(c, away));
+      if (s > bestScore) {
+        bestScore = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
   private ensureOfficials(): void {
     if (this.officials.length) return;
     const cx = PITCH.width / 2;
     const cy = PITCH.height / 2;
-    const make = (kind: "ref" | "lineA" | "lineB", color: number, x: number, y: number) => {
+    const color = this.pickOfficialColor();
+    const make = (kind: "ref" | "lineA" | "lineB", x: number, y: number, facing: number) => {
       const container = new Container();
       const body = new Graphics();
       this.drawOfficialSprite(body, color);
+      body.rotation = facing;
       container.addChild(body);
       this.world.addChild(container);
-      this.officials.push({ kind, container, body, pos: { x, y } });
+      this.officials.push({ kind, container, body, pos: { x, y }, facing });
     };
-    make("ref", 0x18181a, cx, cy); // scheidsrechter (zwart)
-    make("lineA", 0xe6c200, cx, -1.4); // grensrechter bovenlijn (geel)
-    make("lineB", 0xe6c200, cx, PITCH.height + 1.4); // grensrechter onderlijn
+    make("ref", cx, cy, 0);
+    make("lineA", cx, -1.4, Math.PI / 2); // bovenlijn, kijkt het veld in
+    make("lineB", cx, PITCH.height + 1.4, -Math.PI / 2);
   }
 
   /**
@@ -350,18 +377,31 @@ export class MatchRenderer {
     const homeDeep = homeOut.length ? Math.min(...homeOut.map((p) => p.x)) : cx;
     const awayDeep = awayOut.length ? Math.max(...awayOut.map((p) => p.x)) : cx;
 
-    const targets: Record<string, { x: number; y: number; face: number }> = {
-      ref: { x: rx, y: ry, face: Math.atan2(by - ry, bx - rx) },
-      lineA: { x: clamp(homeDeep, 4, cx), y: -1.4, face: Math.PI / 2 },
-      lineB: { x: clamp(awayDeep, cx, W - 4), y: H + 1.4, face: -Math.PI / 2 },
+    // Doel + vaste kijkrichting (grensrechters kijken het veld in en blijven dat
+    // doen; de scheids krijgt zijn richting uit de LOOPbeweging, niet uit de bal).
+    const targets: Record<string, { x: number; y: number; face: number | null; step: number }> = {
+      ref: { x: rx, y: ry, face: null, step: 0.16 }, // ~9.6 u/s loop/jog
+      lineA: { x: clamp(homeDeep, 4, cx), y: -1.4, face: Math.PI / 2, step: 0.2 },
+      lineB: { x: clamp(awayDeep, cx, W - 4), y: H + 1.4, face: -Math.PI / 2, step: 0.2 },
     };
 
     for (const o of this.officials) {
       const t = targets[o.kind]!;
-      o.pos.x += (t.x - o.pos.x) * 0.06;
-      o.pos.y += (t.y - o.pos.y) * 0.06;
+      const dxs = t.x - o.pos.x;
+      const dys = t.y - o.pos.y;
+      const dist = Math.hypot(dxs, dys);
+      if (dist > 0.001) {
+        const move = Math.min(dist, t.step); // gecapte stap = natuurlijke loopsnelheid
+        const nx = dxs / dist;
+        const ny = dys / dist;
+        o.pos.x += nx * move;
+        o.pos.y += ny * move;
+        // Kijkrichting volgt de beweging (scheids), tenzij vast (grensrechters).
+        if (t.face === null && move > 0.04) o.facing = Math.atan2(ny, nx);
+      }
+      if (t.face !== null) o.facing = t.face;
       o.container.position.set(o.pos.x * u, o.pos.y * u);
-      o.body.rotation = t.face;
+      o.body.rotation = o.facing;
     }
   }
 
