@@ -26,6 +26,7 @@ export class MatchRenderer {
   readonly app: Application;
   private world = new Container();
   private pitchLayer = new Graphics();
+  private netLayer = new Graphics(); // doelnetten (elk frame hertekend i.v.m. wobble)
   private ballShadow = new Graphics();
   private aimArrow = new Graphics();
   private ball = new Graphics(); // voetbal-grafiek (eenmalig getekend, roteert)
@@ -33,6 +34,9 @@ export class MatchRenderer {
   private colors: Record<"home" | "away", TeamColors>;
 
   private prev: MatchSnapshot | null = null;
+  // Net-animatie: actieve inslag + welk doelpunt (seq) al getoond is.
+  private lastGoalSeq = 0;
+  private netWobble: { goalX: number; s0: number; intensity: number; t0: number } | null = null;
   // Rol-animatie van de bal: afgelegde afstand + laatste looprichting.
   private ballRoll = 0;
   private lastBallScreen: { x: number; y: number } | null = null;
@@ -44,6 +48,7 @@ export class MatchRenderer {
 
     this.app.stage.addChild(this.world);
     this.world.addChild(this.pitchLayer);
+    this.world.addChild(this.netLayer);
     this.world.addChild(this.ballShadow);
     this.world.addChild(this.aimArrow);
     this.world.addChild(this.ball);
@@ -172,9 +177,8 @@ export class MatchRenderer {
     arc(0, H * u, cr * u, -Math.PI / 2, 0);
     arc(W * u, H * u, cr * u, Math.PI, (3 * Math.PI) / 2);
 
-    // Doelen met net.
-    this.drawGoalNet(g, 0, -1);
-    this.drawGoalNet(g, W, 1);
+    // Doelnetten worden elke frame in netLayer getekend (zie drawNets), zodat ze
+    // bij een doelpunt kunnen meebewegen.
   }
 
   /**
@@ -182,7 +186,7 @@ export class MatchRenderer {
    * Alleen op de doellijn een dikke witte lijn (de lat); naar achteren is alles
    * dun net (geen kader eromheen).
    */
-  private drawGoalNet(g: Graphics, xLine: number, dir: number): void {
+  private drawGoalNet(g: Graphics, xLine: number, dir: number, bulge = 0, s0 = 0.5): void {
     const u = PX_PER_UNIT;
     const gw = PITCH.goalWidth;
     const cy = PITCH.height / 2;
@@ -192,10 +196,12 @@ export class MatchRenderer {
 
     // Parametrisch net: s = breedte (0..1), t = diepte (0..1). De doellijn (t=0)
     // is recht; de zijkanten lopen recht naar achter, alleen de achterkant holt
-    // licht naar binnen (hangt door naar het doel).
+    // licht naar binnen. `bulge` (u) duwt het net bij een doelpunt naar achteren,
+    // plaatselijk rond `s0` en sterker naar achteren (de bal-inslag).
     const P = (s: number, t: number): [number, number] => {
       const half = gw / 2 + fan * t;
-      const back = depth * t - dip * Math.sin(Math.PI * s) * t * t;
+      const bump = bulge * Math.exp(-(((s - s0) / 0.28) ** 2)) * t * t;
+      const back = depth * t - dip * Math.sin(Math.PI * s) * t * t + bump;
       return [(xLine + dir * back) * u, (cy + (s - 0.5) * 2 * half) * u];
     };
 
@@ -228,6 +234,46 @@ export class MatchRenderer {
 
     // Dikke witte lat alleen op de doellijn.
     g.moveTo(...P(0, 0)).lineTo(...P(1, 0)).stroke({ width: 2.8, color: 0xffffff });
+  }
+
+  /**
+   * Teken beide doelnetten in netLayer. Bij een nieuw doelpunt (goalImpact.seq)
+   * start een gedempte "wobble": het getroffen net bolt naar achteren rond het
+   * inslagpunt en veert uit. Puur presentatie; leest alleen de snapshot.
+   */
+  private drawNets(snap: MatchSnapshot): void {
+    const gi = snap.goalImpact;
+    if (gi && gi.seq !== this.lastGoalSeq) {
+      this.lastGoalSeq = gi.seq;
+      const cy = PITCH.height / 2;
+      const gw = PITCH.goalWidth;
+      const s0 = Math.min(1, Math.max(0, (gi.y - (cy - gw / 2)) / gw));
+      const intensity = Math.min(1, Math.max(0.4, gi.speed / 32));
+      this.netWobble = { goalX: gi.goalX, s0, intensity, t0: performance.now() };
+    }
+
+    let bulge = 0;
+    let s0 = 0.5;
+    let goalX = -1;
+    if (this.netWobble) {
+      const tau = (performance.now() - this.netWobble.t0) / 1000;
+      const DURATION = 0.9;
+      if (tau > DURATION) {
+        this.netWobble = null;
+      } else {
+        const MAX = 1.5; // max uitslag (u) naar achteren
+        const DECAY = 0.22;
+        const OMEGA = 22;
+        bulge = this.netWobble.intensity * MAX * Math.exp(-tau / DECAY) * Math.cos(OMEGA * tau);
+        s0 = this.netWobble.s0;
+        goalX = this.netWobble.goalX;
+      }
+    }
+
+    const g = this.netLayer;
+    g.clear();
+    this.drawGoalNet(g, 0, -1, goalX === 0 ? bulge : 0, s0);
+    this.drawGoalNet(g, PITCH.width, 1, goalX === PITCH.width ? bulge : 0, s0);
   }
 
   private ensurePlayer(p: MatchSnapshotPlayer): PlayerNode {
@@ -303,6 +349,9 @@ export class MatchRenderer {
       screenW / 2 - (vx * cos - vy * sin),
       screenH / 2 - (vx * sin + vy * cos),
     );
+
+    // Doelnetten (incl. eventuele goal-wobble) elk frame opnieuw.
+    this.drawNets(snap);
 
     const prev = this.prev;
     const prevById = new Map(prev?.players.map((p) => [p.id, p]));

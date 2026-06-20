@@ -97,6 +97,8 @@ export interface MatchSnapshot {
   restartAim: number | null;
   /** Doelpunten in volgorde, met maker en minuut (voor de scorebord-overlay). */
   goals: GoalEvent[];
+  /** Laatste bal-in-het-doel (voor de net-animatie); seq stijgt per doelpunt. */
+  goalImpact: GoalImpact | null;
 }
 
 export interface GoalEvent {
@@ -104,6 +106,16 @@ export interface GoalEvent {
   scorer: string;
   minute: number;
   ownGoal: boolean;
+}
+
+/** Inslag van de bal in het doel: welk doel (x-lijn), op welke hoogte (y) en hoe
+ *  hard (snelheid). `seq` stijgt per doelpunt zodat de renderer een nieuwe inslag
+ *  herkent. Puur presentatie — beïnvloedt de sim niet. */
+export interface GoalImpact {
+  goalX: number;
+  y: number;
+  speed: number;
+  seq: number;
 }
 
 export class MatchSim {
@@ -126,6 +138,8 @@ export class MatchSim {
   private kickoffSide: Side = "home";
   private lastConcededSide: Side | null = null;
   private goals: GoalEvent[] = [];
+  private goalImpact: GoalImpact | null = null;
+  private goalImpactSeq = 0;
 
   private humanSide: Side | null;
   activeId: Record<Side, string | null> = { home: null, away: null };
@@ -1242,16 +1256,28 @@ export class MatchSim {
 
     if (this.ball.pos.x <= 0) {
       // home-doel: away scoort.
+      this.recordGoalImpact(0);
       this.score.away += 1;
       this.onGoal("away");
       return true;
     }
     if (this.ball.pos.x >= PITCH.width) {
+      this.recordGoalImpact(PITCH.width);
       this.score.home += 1;
       this.onGoal("home");
       return true;
     }
     return false;
+  }
+
+  /** Leg de bal-inslag in het doel vast voor de net-animatie (presentatie). */
+  private recordGoalImpact(goalX: number): void {
+    this.goalImpact = {
+      goalX,
+      y: this.ball.pos.y,
+      speed: Math.hypot(this.ball.vel.x, this.ball.vel.y),
+      seq: ++this.goalImpactSeq,
+    };
   }
 
   private onGoal(scoringSide: Side): void {
@@ -1833,6 +1859,7 @@ export class MatchSim {
           ? this.restartAim
           : null,
       goals: this.goals.map((g) => ({ ...g })),
+      goalImpact: this.goalImpact ? { ...this.goalImpact } : null,
     };
   }
 }

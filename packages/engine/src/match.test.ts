@@ -435,4 +435,40 @@ describe("MatchSim", () => {
     }
     expect(scored).toBe(true);
   });
+
+  it("een doelpunt legt een goalImpact vast (voor de net-animatie)", () => {
+    const sim = new MatchSim({ ...makeConfig(5), humanSide: "home" });
+    const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };
+    let g = 0;
+    while (sim.snapshot().phase !== "play" && g < 4000) {
+      const s = sim.snapshot();
+      sim.step(TICK_DT, s.awaitingHumanRestart ? press : emptyIntent());
+      g++;
+    }
+    for (const p of sim.players) {
+      p.pos = { x: 60, y: 4 };
+      p.vel = { x: 0, y: 0 };
+    }
+    // Bal recht in het midden van het linkerdoel.
+    sim.ball.pos = { x: 0.6, y: PITCH.height / 2 };
+    sim.ball.z = 0;
+    sim.ball.vz = 0;
+    sim.ball.vel = { x: -18, y: 0 };
+    sim.ball.ownerId = null;
+    sim.ball.lastTouchId = "x";
+    sim.ball.sinceKick = 999;
+
+    let scored = false;
+    for (let i = 0; i < 8 && !scored; i++) {
+      sim.step(TICK_DT, emptyIntent());
+      if (sim.snapshot().phase === "goal") scored = true;
+    }
+    expect(scored).toBe(true);
+    const gi = sim.snapshot().goalImpact!;
+    expect(gi).not.toBeNull();
+    expect(gi.goalX).toBe(0); // linkerdoel
+    expect(gi.seq).toBeGreaterThan(0);
+    expect(gi.speed).toBeGreaterThan(5);
+    expect(Math.abs(gi.y - PITCH.height / 2)).toBeLessThan(2);
+  });
 });
