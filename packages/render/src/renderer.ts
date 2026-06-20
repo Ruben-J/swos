@@ -371,9 +371,11 @@ export class MatchRenderer {
     const ease = Math.min(1, dt * 1.4); // tijdconstante ~0.7s
     this.refAnchor.x += (bx - this.refAnchor.x) * ease;
     this.refAnchor.y += (by - this.refAnchor.y) * ease;
-    // Gewenste positie: bij het (gelagde) spel, sterke midden-bias, buiten de boxen.
-    const rx = clamp(this.refAnchor.x * 0.55 + cx * 0.45, box + 3, W - box - 3);
-    const ry = clamp(this.refAnchor.y * 0.6 + cy * 0.4, 6, H - 6);
+    // Gewenste positie: dicht bij het (gelagde) spel met slechts een lichte
+    // midden-bias, zodat hij meeloopt met de bal i.p.v. in het midden te parkeren.
+    // Buiten de strafschopgebieden.
+    const rx = clamp(this.refAnchor.x * 0.82 + cx * 0.18, box + 3, W - box - 3);
+    const ry = clamp(this.refAnchor.y * 0.82 + cy * 0.18, 6, H - 6);
 
     // Grensrechters: achterste veldspeler (geen keeper) van de verdedigende kant.
     const homeOut = snap.players.filter((p) => p.side === "home" && !p.isKeeper);
