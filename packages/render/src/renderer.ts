@@ -187,12 +187,12 @@ export class MatchRenderer {
     const gw = PITCH.goalWidth;
     const cy = PITCH.height / 2;
     const depth = 2.8; // diepte van het net achter de lijn
-    const dip = 0.6; // hoe ver de achterkant in het midden naar binnen holt
-    const fan = 0.55; // lichte verbreding naar achteren
+    const dip = 0.32; // hoe ver de achterkant in het midden naar binnen holt
+    const fan = 0; // zijkanten lopen recht naar achter (geen verbreding)
 
     // Parametrisch net: s = breedte (0..1), t = diepte (0..1). De doellijn (t=0)
-    // is recht; naar achteren holt het net in het midden naar binnen (hangt door
-    // naar het doel) i.p.v. kaarsrecht of bol te staan.
+    // is recht; de zijkanten lopen recht naar achter, alleen de achterkant holt
+    // licht naar binnen (hangt door naar het doel).
     const P = (s: number, t: number): [number, number] => {
       const half = gw / 2 + fan * t;
       const back = depth * t - dip * Math.sin(Math.PI * s) * t * t;
