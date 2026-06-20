@@ -1003,6 +1003,12 @@ kbd {
   height: 22px;
   border-radius: 5px;
 }
+.kit-shirt {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
 .intro-name {
   font-size: 1.25rem;
   font-weight: 800;

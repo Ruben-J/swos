@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { MatchConfig, MatchSnapshot, MatchSnapshotPlayer, Side } from "@pitch/engine";
 import { RULES } from "@pitch/shared";
 import { MatchController } from "../match/MatchController.js";
@@ -72,13 +72,13 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
 
         {/* TV-scorebug linksboven. */}
         <div className="scorebug">
-          <span className="sb-chip" style={{ background: config.home.colorPrimary }} />
+          <KitShirt primary={config.home.colorPrimary} secondary={config.home.colorSecondary} pattern={config.home.pattern} size={18} />
           <span className="sb-team">{config.home.shortName}</span>
           <span className="sb-score">
             {snap?.score.home ?? 0}&ndash;{snap?.score.away ?? 0}
           </span>
           <span className="sb-team">{config.away.shortName}</span>
-          <span className="sb-chip" style={{ background: config.away.colorPrimary }} />
+          <KitShirt primary={config.away.colorPrimary} secondary={config.away.colorSecondary} pattern={config.away.pattern} size={18} />
           <span className="sb-clock">{clock}</span>
         </div>
 
@@ -172,6 +172,42 @@ function formatClock(minute: number): string {
 type LineupTeam = MatchConfig["home"];
 
 /** Opkomst: beide opstellingen links (thuis) en rechts (uit) + formatie-diagram. */
+/** Mini voetbalshirt-SVG met het huidige tenue (kleur + patroon). */
+const SHIRT_PATH =
+  "M11 4 L13.5 6.5 H18.5 L21 4 L28 8 L24.5 12.5 L23.5 27.5 H8.5 L7.5 12.5 L4 8 Z";
+
+function KitShirt({
+  primary,
+  secondary,
+  pattern,
+  size = 22,
+}: {
+  primary: string;
+  secondary: string;
+  pattern?: "plain" | "stripes" | "centre";
+  size?: number;
+}) {
+  const clip = useId();
+  return (
+    <svg className="kit-shirt" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
+      <defs>
+        <clipPath id={clip}>
+          <path d={SHIRT_PATH} />
+        </clipPath>
+      </defs>
+      <path d={SHIRT_PATH} fill={primary} />
+      <g clipPath={`url(#${clip})`}>
+        {pattern === "stripes" &&
+          [8.5, 12, 15.5, 19, 22.5].map((x) => (
+            <rect key={x} x={x - 1} y="2" width="2" height="28" fill={secondary} />
+          ))}
+        {pattern === "centre" && <rect x="14.4" y="2" width="3.2" height="28" fill={secondary} />}
+      </g>
+      <path d={SHIRT_PATH} fill="none" stroke="rgba(0,0,0,0.4)" strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function LineupsOverlay({ config }: { config: MatchConfig }) {
   return (
     <div className="lineups-overlay">
@@ -185,7 +221,7 @@ function TeamLineup({ team, align }: { team: LineupTeam; align: "left" | "right"
   return (
     <div className={`lineup-card lineup-${align}`}>
       <div className="intro-team">
-        <span className="intro-chip" style={{ background: team.colorPrimary }} />
+        <KitShirt primary={team.colorPrimary} secondary={team.colorSecondary} pattern={team.pattern} size={26} />
         <span className="intro-name">{team.name}</span>
       </div>
       <FormationPitch team={team} />
@@ -286,7 +322,7 @@ function RestartBoard({ config, snap }: { config: MatchConfig; snap: MatchSnapsh
       <div className="rb-title">{BOARD_TITLE[snap.phase] ?? ""}</div>
       <div className="rb-main">
         <div className="rb-team rb-home">
-          <span className="rb-chip" style={{ background: config.home.colorPrimary }} />
+          <KitShirt primary={config.home.colorPrimary} secondary={config.home.colorSecondary} pattern={config.home.pattern} size={28} />
           <span className="rb-name">{config.home.name}</span>
         </div>
         <div className="rb-score">
@@ -294,7 +330,7 @@ function RestartBoard({ config, snap }: { config: MatchConfig; snap: MatchSnapsh
         </div>
         <div className="rb-team rb-away">
           <span className="rb-name">{config.away.name}</span>
-          <span className="rb-chip" style={{ background: config.away.colorPrimary }} />
+          <KitShirt primary={config.away.colorPrimary} secondary={config.away.colorSecondary} pattern={config.away.pattern} size={28} />
         </div>
       </div>
       <div className="rb-scorers">
