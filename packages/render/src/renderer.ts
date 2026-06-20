@@ -209,8 +209,8 @@ export class MatchRenderer {
     g.poly(outline).fill({ color: 0xffffff, alpha: 0.05 });
 
     // Fijn maaswerk dat de welving volgt (even dichte mazen beide richtingen).
-    const mesh = { width: 0.7, color: 0xffffff, alpha: 0.32 } as const;
-    const cell = 0.42;
+    const mesh = { width: 0.5, color: 0xffffff, alpha: 0.3 } as const;
+    const cell = 0.26;
     const wL = Math.round(gw / cell); // strengen langs de breedte (front->back)
     for (let i = 0; i <= wL; i++) {
       const s = i / wL;
