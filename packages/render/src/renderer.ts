@@ -336,7 +336,9 @@ export class MatchRenderer {
       this.world.addChild(container);
       this.officials.push({ kind, container, body, pos: { x, y }, facing });
     };
-    make("ref", cx, cy, 0);
+    // Scheids start bij de tunnel (middenlijn, buiten de bovenlijn) en loopt mee
+    // het veld op tijdens de walkout — niet zomaar op de middenstip.
+    make("ref", cx - 2, -3.5, Math.PI / 2);
     make("lineA", cx, -1.4, Math.PI / 2); // bovenlijn, kijkt het veld in
     make("lineB", cx, PITCH.height + 1.4, -Math.PI / 2);
   }
@@ -371,11 +373,15 @@ export class MatchRenderer {
     const ease = Math.min(1, dt * 1.4); // tijdconstante ~0.7s
     this.refAnchor.x += (bx - this.refAnchor.x) * ease;
     this.refAnchor.y += (by - this.refAnchor.y) * ease;
-    // Gewenste positie: dicht bij het (gelagde) spel met slechts een lichte
-    // midden-bias, zodat hij meeloopt met de bal i.p.v. in het midden te parkeren.
-    // Buiten de strafschopgebieden.
-    const rx = clamp(this.refAnchor.x * 0.82 + cx * 0.18, box + 3, W - box - 3);
-    const ry = clamp(this.refAnchor.y * 0.82 + cy * 0.18, 6, H - 6);
+    // Lengte (op/neer): loopt vooral met de bal mee over het veld, lichte bias.
+    const rx = clamp(this.refAnchor.x * 0.85 + cx * 0.15, box + 3, W - box - 3);
+    // Breedte (zijwaarts, diagonaalsysteem): ligt de bal in het midden, dan staat
+    // hij opzij; ligt de bal aan een zijkant, dan trekt hij naar het midden. De
+    // zijde volgt de helft waarin de bal ligt ("wat uitkomt").
+    const halfW = H / 2;
+    const lateral = clamp((this.refAnchor.y - cy) / halfW, -1, 1);
+    const diag = this.refAnchor.x >= cx ? 1 : -1;
+    const ry = clamp(cy + diag * 11 * (1 - Math.abs(lateral)), 6, H - 6);
 
     // Grensrechters: achterste veldspeler (geen keeper) van de verdedigende kant.
     const homeOut = snap.players.filter((p) => p.side === "home" && !p.isKeeper);
@@ -398,13 +404,11 @@ export class MatchRenderer {
       const dist = Math.hypot(dxs, dys);
       if (dist > 0.001) {
         const move = Math.min(dist, walk); // nooit sneller dan een speler loopt
-        const nx = dxs / dist;
-        const ny = dys / dist;
-        o.pos.x += nx * move;
-        o.pos.y += ny * move;
-        if (t.face === null && move > walk * 0.25) o.facing = Math.atan2(ny, nx);
+        o.pos.x += (dxs / dist) * move;
+        o.pos.y += (dys / dist) * move;
       }
-      if (t.face !== null) o.facing = t.face;
+      // Scheids kijkt naar de bal; grensrechters het veld in (vaste hoek).
+      o.facing = t.face === null ? Math.atan2(by - o.pos.y, bx - o.pos.x) : t.face;
       o.container.position.set(o.pos.x * u, o.pos.y * u);
       o.body.rotation = o.facing;
     }
