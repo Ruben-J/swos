@@ -7,6 +7,7 @@ const PX_PER_UNIT = 11;
 export interface TeamColors {
   primary: string;
   secondary: string;
+  pattern?: "plain" | "stripes" | "centre";
 }
 
 interface PlayerNode {
@@ -238,7 +239,9 @@ export class MatchRenderer {
     const ring = new Graphics();
     const col = this.colors[p.side];
     const shirt = p.isKeeper ? 0x2bd06a : hexToNum(col.primary);
-    this.drawPlayerSprite(body, shirt, hexToNum(p.hairColor), hexToNum(p.skinColor));
+    const accent = p.isKeeper ? 0x125a30 : hexToNum(col.secondary);
+    const pattern = p.isKeeper ? "plain" : col.pattern ?? "plain";
+    this.drawPlayerSprite(body, shirt, accent, pattern, hexToNum(p.hairColor), hexToNum(p.skinColor));
     container.addChild(shadow, ring, body);
     this.world.addChild(container);
     node = { container, body, ring, shadow };
@@ -251,11 +254,27 @@ export class MatchRenderer {
    * schouders, daarboven een hoofd (haarkleur) met een gezicht (huidtint) dat
    * naar voren wijst, zodat je de kijkrichting ziet.
    */
-  private drawPlayerSprite(g: Graphics, shirt: number, hair: number, skin: number): void {
+  private drawPlayerSprite(
+    g: Graphics,
+    shirt: number,
+    accent: number,
+    pattern: "plain" | "stripes" | "centre",
+    hair: number,
+    skin: number,
+  ): void {
     g.clear();
-    // Schaduwzijde van het shirt (donkerder achterkant) als simpele diepte.
-    // Romp/schouders (breder dwars op de kijkrichting).
+    // Romp/schouders (breder dwars op de kijkrichting). +x = kijkrichting.
     g.ellipse(-0.3, 0, 4.1, 4.8).fill(shirt).stroke({ width: 1.2, color: 0x101010, alpha: 0.8 });
+    // Shirtpatroon (binnen de romp-ellips, dus geen overloop). Verticale banden
+    // (dwars op de kijkrichting) in de accentkleur.
+    if (pattern === "centre") {
+      g.ellipse(-0.3, 0, 0.95, 4.3).fill(accent);
+    } else if (pattern === "stripes") {
+      for (const d of [-2.4, -1.2, 0, 1.2, 2.4]) {
+        const ry = 4.3 * Math.sqrt(Math.max(0, 1 - (d / 3.9) ** 2));
+        g.ellipse(-0.3 + d, 0, 0.42, ry).fill(accent);
+      }
+    }
     // Korte broek-hint achteraan.
     g.ellipse(-2.3, 0, 1.9, 3.5).fill({ color: 0x20242b, alpha: 0.55 });
     // Hoofd: haar (kruin) met gezicht (huid) naar voren.

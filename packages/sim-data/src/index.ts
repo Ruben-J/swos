@@ -2,6 +2,7 @@ export * from "./names.js";
 export * from "./generate.js";
 export * from "./world/catalogue.js";
 export * from "./world/squad.js";
+export * from "./world/kits.js";
 export * from "./world/build.js";
 export * from "./career/fixtures.js";
 export * from "./career/standings.js";

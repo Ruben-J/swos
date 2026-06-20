@@ -132,6 +132,8 @@ export interface TeamSetup {
   shortName: string;
   colorPrimary: string;
   colorSecondary: string;
+  /** Shirtpatroon: "plain" | "stripes" | "centre". */
+  pattern?: "plain" | "stripes" | "centre";
   players: MatchPlayerSetup[];
   /** Optionele tactische instelling; valt terug op DEFAULT_TACTICS. */
   tactics?: TeamTacticsConfig;

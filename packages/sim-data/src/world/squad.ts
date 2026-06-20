@@ -1,5 +1,6 @@
 import { Rng, clamp, rngId, type Player, type Position, type Team } from "@pitch/shared";
 import { FORMATIONS, type MatchPlayerSetup, type MatchPlayerStats, type TeamSetup } from "@pitch/engine";
+import { kitFor } from "./kits.js";
 
 /** Verdeling van formaties over de clubs (deterministisch op team-id). */
 const FORMATION_POOL = ["4-4-2", "4-4-2", "4-3-3", "4-3-3", "4-3-3", "3-5-2", "3-4-3", "4-5-1"];
@@ -269,8 +270,14 @@ export interface TeamSetupOverride {
 }
 
 /** Kies de XI in de teamformatie en bouw een engine-TeamSetup voor live spel.
- *  Met `override` bepaalt de manager formatie/opstelling/tactiek zelf. */
-export function toTeamSetup(team: Team, players: Player[], override?: TeamSetupOverride): TeamSetup {
+ *  Met `override` bepaalt de manager formatie/opstelling/tactiek zelf. `kitSide`
+ *  kiest het thuis- of uittenue (thuisploeg = "home", uitploeg = "away"). */
+export function toTeamSetup(
+  team: Team,
+  players: Player[],
+  override?: TeamSetupOverride,
+  kitSide: "home" | "away" = "home",
+): TeamSetup {
   const formationName = override?.formationName || teamFormationName(team.id);
   const formation = (FORMATIONS[formationName] ?? FORMATIONS["4-4-2"]!) as Position[];
 
@@ -323,12 +330,14 @@ export function toTeamSetup(team: Team, players: Player[], override?: TeamSetupO
     };
   });
 
+  const kit = kitFor(team, kitSide);
   return {
     id: team.id,
     name: team.name,
     shortName: team.shortName,
-    colorPrimary: team.colors.primary,
-    colorSecondary: team.colors.secondary,
+    colorPrimary: kit.primary,
+    colorSecondary: kit.secondary,
+    pattern: kit.pattern,
     players: setupPlayers,
     formationName,
     tactics: override?.shape

@@ -16,6 +16,7 @@ import {
 import { FIRST_NAMES, LAST_NAMES } from "../names.js";
 import { generateSquad, teamRating } from "./squad.js";
 import { COUNTRIES, type ClubSeed } from "./catalogue.js";
+import { makeKits } from "./kits.js";
 import { CLUB_SQUADS } from "./squads/index.js";
 import { buildDoubleRoundRobin } from "../career/fixtures.js";
 import { addDays } from "../career/dates.js";
@@ -114,6 +115,7 @@ function makeTeam(
       trim: seed.colors[1],
       goalkeeperPrimary: "#1c1c1c",
     },
+    kits: makeKits(teamId, seed.colors[0], seed.colors[1]),
     stadium: {
       name: `${seed.city} Arena`,
       capacity: Math.round(clamp(seed.strength * 60_000 + rng.range(4_000, 12_000), 6_000, 82_000)),

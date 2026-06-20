@@ -50,8 +50,8 @@ export class MatchController {
     const controller = new MatchController(sim, camera, input);
     controller.hudListener = hud;
     controller.renderer = await MatchRenderer.create(canvas, {
-      home: { primary: config.home.colorPrimary, secondary: config.home.colorSecondary },
-      away: { primary: config.away.colorPrimary, secondary: config.away.colorSecondary },
+      home: { primary: config.home.colorPrimary, secondary: config.home.colorSecondary, pattern: config.home.pattern },
+      away: { primary: config.away.colorPrimary, secondary: config.away.colorSecondary, pattern: config.away.pattern },
     });
     controller.fitCamera();
     input.attach();

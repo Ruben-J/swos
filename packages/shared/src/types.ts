@@ -32,6 +32,16 @@ export interface TeamColors {
   goalkeeperPrimary: string;
 }
 
+/** Shirtpatroon: effen, smalle verticale strepen, of één middenstreep. */
+export type KitPattern = "plain" | "stripes" | "centre";
+
+/** Eén tenue (thuis of uit): hoofdkleur, accentkleur (strepen/nummer) + patroon. */
+export interface Kit {
+  primary: string;
+  secondary: string;
+  pattern: KitPattern;
+}
+
 export interface Team {
   id: UUID;
   worldId: UUID;
@@ -41,6 +51,8 @@ export interface Team {
   countryCode: string;
   divisionId: UUID;
   colors: TeamColors;
+  /** Thuis- en uittenue (renderer kiest op basis van thuis/uit). */
+  kits?: { home: Kit; away: Kit };
   stadium: {
     name: string;
     capacity: number;

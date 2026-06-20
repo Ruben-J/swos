@@ -505,3 +505,27 @@ describe("ai-transfers", () => {
     }
   });
 });
+
+describe("tenues (kits)", () => {
+  it("elk team heeft een thuis- en uitkit; uit wijkt af van thuis", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    for (const t of world.teams) {
+      expect(t.kits).toBeDefined();
+      expect(t.kits!.home.primary).not.toBe(t.kits!.away.primary);
+      for (const k of [t.kits!.home, t.kits!.away]) {
+        expect(["plain", "stripes", "centre"]).toContain(k.pattern);
+      }
+    }
+  });
+
+  it("toTeamSetup gebruikt het thuis- of uittenue + patroon", () => {
+    const world = buildWorld(new Rng(11), 2025);
+    const team = world.teams[0]!;
+    const players = world.players.filter((p) => p.teamId === team.id);
+    const home = toTeamSetup(team, players, undefined, "home");
+    const away = toTeamSetup(team, players, undefined, "away");
+    expect(home.colorPrimary).toBe(team.kits!.home.primary);
+    expect(away.colorPrimary).toBe(team.kits!.away.primary);
+    expect(home.pattern).toBe(team.kits!.home.pattern);
+  });
+});

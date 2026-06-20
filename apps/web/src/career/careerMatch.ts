@@ -16,8 +16,8 @@ export function worldMatchConfig(world: World, homeId: UUID, awayId: UUID, seed:
   const playersOf = (id: UUID): Player[] => world.players.filter((p) => p.teamId === id);
   return {
     seed,
-    home: toTeamSetup(home, playersOf(homeId)),
-    away: toTeamSetup(away, playersOf(awayId)),
+    home: toTeamSetup(home, playersOf(homeId), undefined, "home"),
+    away: toTeamSetup(away, playersOf(awayId), undefined, "away"),
     humanSide: "home",
   };
 }
@@ -36,8 +36,8 @@ export function buildMatchConfig(save: CareerSave, match: Match, humanTeamId: UU
   const away = teamById(save, match.awayTeamId)!;
   // De door de manager gekozen opstelling/tactiek geldt voor zijn eigen club.
   const mine = toOverride(save.manager.tactics);
-  const homeSetup = toTeamSetup(home, playersOfTeam(save, home.id), home.id === humanTeamId ? mine : undefined);
-  const awaySetup = toTeamSetup(away, playersOfTeam(save, away.id), away.id === humanTeamId ? mine : undefined);
+  const homeSetup = toTeamSetup(home, playersOfTeam(save, home.id), home.id === humanTeamId ? mine : undefined, "home");
+  const awaySetup = toTeamSetup(away, playersOfTeam(save, away.id), away.id === humanTeamId ? mine : undefined, "away");
   return {
     seed: hashSeed(match.id),
     home: homeSetup,
