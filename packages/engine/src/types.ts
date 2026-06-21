@@ -58,6 +58,10 @@ export interface PlayerEntity {
   exhausted: boolean;
   /** Eindpunt van een keeperduik: hij stopt hier i.p.v. door te schieten. */
   diveTarget?: Vec2 | null;
+  /** Hoogte boven de grond (units), >0 alleen tijdens een keeperduik (sprong). */
+  z?: number;
+  /** Verticale snelheid voor de duik-sprong (units/s). */
+  vz?: number;
 }
 
 /** De bal als spel-specifiek kinematisch object. */
