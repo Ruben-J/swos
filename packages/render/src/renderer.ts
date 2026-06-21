@@ -133,12 +133,36 @@ export class MatchRenderer {
     const u = PX_PER_UNIT;
     g.clear();
 
-    // Gestreept gras.
-    const stripes = 14;
+    // Gemaaid gras: verticale maaibanen, een subtiele horizontale dwarsmaai
+    // (schaakbordeffect) en fijne spikkeling zodat het op echt gazon lijkt.
+    const stripes = 16;
     for (let i = 0; i < stripes; i++) {
       const x = (i / stripes) * W;
       const w = W / stripes;
       g.rect(x * u, 0, w * u, H * u).fill(i % 2 === 0 ? 0x1f7a3a : 0x1c6b34);
+    }
+    // Lichte dwarsmaai -> schaakbordpatroon van het gazon.
+    const rows = 10;
+    for (let j = 0; j < rows; j++) {
+      const y = (j / rows) * H;
+      const h = H / rows;
+      g.rect(0, y * u, W * u, h * u).fill({ color: j % 2 === 0 ? 0xffffff : 0x000000, alpha: 0.035 });
+    }
+    // Fijne spikkeling (bladmottel), deterministisch zodat de textuur stabiel is.
+    let seed = 0x12345678 >>> 0;
+    const rnd = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const tones = [0x2a8f48, 0x176030, 0x238b42, 0x1a6634];
+    for (let k = 0; k < 1600; k++) {
+      const px = rnd() * W * u;
+      const py = rnd() * H * u;
+      const rr = (0.22 + rnd() * 0.55) * u;
+      g.ellipse(px, py, rr, rr * (0.55 + rnd() * 0.5)).fill({
+        color: tones[(rnd() * tones.length) | 0]!,
+        alpha: 0.05 + rnd() * 0.06,
+      });
     }
 
     const line = { width: 2, color: 0xffffff, alpha: 0.85 };
