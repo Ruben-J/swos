@@ -419,14 +419,14 @@ export class MatchSim {
       // baldragende tegenstander zit (lichaam binnen bereik) terwijl de bal net
       // buiten schoon bereik is, kan een mistimede sliding inzetten -> de man
       // i.p.v. de bal raken. Kans is klein en hoger bij een zwakke tackler.
-      if (!isHumanActive && !p.isKeeper && p.tackleCooldown <= 0 && !cmd.tackle) {
+      if (!isHumanActive && !p.isKeeper && p.tackleCooldown <= 0 && !cmd.tackle && !cmd.slide) {
         const owner = this.byId(this.ball.ownerId);
         if (owner && owner.side !== p.side) {
           const dMan = dist(p.pos, owner.pos);
           const dBall = dist(p.pos, this.ball.pos);
           if (dMan < PLAYER.tackleRange + 0.3 && dBall > PLAYER.tackleRange) {
             const foulProb = 0.006 * (1.5 - p.stats.tackling / 100);
-            if (this.rng.chance(foulProb)) cmd.tackle = true;
+            if (this.rng.chance(foulProb)) cmd.slide = true; // mistimede inglijder
           }
         }
       }
@@ -653,8 +653,10 @@ export class MatchSim {
           ? { dir: aimDir, power: 26, loft: 3, curve: 0 }
           : { dir: aimDir, power: 16, loft: 0, curve: 0 };
       } else {
-        // Sliding tackle richting de bal.
-        cmd.tackle = true;
+        // Niet aan de bal: X = sliding tackle (inglijden, kan overtreding worden),
+        // Z = staande tackle (poken, veilig, alleen winst als hij de bal raakt).
+        if (shoot) cmd.tackle = true;
+        else cmd.slide = true;
       }
     }
     return cmd;
@@ -703,6 +705,23 @@ export class MatchSim {
       p.vz = (p.vz ?? 0) - BALL.gravity * dt;
       if (p.z <= 0) p.vz = 0;
       p.stateTimer = Math.max(0, p.stateTimer - dt);
+      return;
+    }
+
+    // Sliding tackle is een COMMITMENT: eenmaal ingezet glijdt de speler
+    // ballistisch door in de inzet-richting — NIET bij te sturen. Onderweg wordt
+    // contact afgehandeld: raakt hij de BAL dan wint hij 'm; raakt hij (zonder bal)
+    // het LIJF van een tegenstander dan is het een overtreding. Pas op echt
+    // contact, dus niet meer "te snel" een fluit.
+    if (p.state === "slide" && p.stateTimer > 0) {
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.vel.x *= Math.max(0, 1 - dt * 4); // glijdt uit
+      p.vel.y *= Math.max(0, 1 - dt * 4);
+      p.pos.x = clamp(p.pos.x, -PLAYER_OOB, PITCH.width + PLAYER_OOB);
+      p.pos.y = clamp(p.pos.y, -PLAYER_OOB, PITCH.height + PLAYER_OOB);
+      p.stateTimer = Math.max(0, p.stateTimer - dt);
+      this.resolveSlideContact(p);
       return;
     }
 
@@ -777,53 +796,76 @@ export class MatchSim {
       p.stateTimer = 0.2;
     }
 
-    // Tackle (sliding) — uitzondering op de spelerbotsing: je mag inglijden.
-    if (cmd.tackle && p.tackleCooldown <= 0) {
+    // Tackles. Twee soorten:
+    //  - STAANDE tackle (cmd.tackle): poken naar de bal zonder in te glijden. Wint
+    //    alleen als hij de bal echt raakt; maakt vrijwel nooit een overtreding.
+    //  - SLIDING tackle (cmd.slide): inglijden met impuls (uitzondering op de
+    //    spelerbotsing). Wint de bal of, mis je 'm en raak je de man, overtreding.
+    if (cmd.slide && p.tackleCooldown <= 0) {
+      // Sliding STARTEN: vaste glij-impuls naar de bal (commitment). Het winnen
+      // van de bal / de overtreding wordt onderweg afgehandeld in de slide-branch
+      // hierboven (op echt contact), niet hier op het inzet-moment.
+      p.state = "slide";
+      p.stateTimer = 0.55;
+      p.tackleCooldown = 1.0;
+      p.slideTouched = false;
+      // Glij de STUURrichting op (waar de speler heen duwt), niet automatisch naar
+      // de bal. Geen input -> de huidige kijkrichting.
+      const lunge =
+        len(cmd.move) > 0.1
+          ? normalize(cmd.move)
+          : { x: Math.cos(p.facing), y: Math.sin(p.facing) };
+      p.vel.x = lunge.x * 12;
+      p.vel.y = lunge.y * 12;
+      p.facing = angleOf(lunge);
+      // Raakt hij op het inzet-moment al de bal of een tegenstander, meteen afhandelen.
+      this.resolveSlideContact(p);
+    } else if (cmd.tackle && p.tackleCooldown <= 0) {
+      // STAANDE tackle: instant poken; wint alleen als de bal echt binnen bereik
+      // is. Mist hij, dan raakt hij niemand hard -> geen overtreding.
       p.state = "tackle";
-      p.stateTimer = 0.35;
-      p.tackleCooldown = 0.9;
-      // Inglij-impuls richting de bal.
-      const lunge = dirTo(p, this.ball.pos);
-      p.vel.x += lunge.x * 6;
-      p.vel.y += lunge.y * 6;
-
-      // Beschermde bal (keeper vast): niet af te pakken door de tegenstander.
+      p.stateTimer = 0.3;
+      p.tackleCooldown = 0.6;
       const stealable = !this.ballProtectedFor || this.ballProtectedFor === p.side;
       const dBall = dist(p.pos, this.ball.pos);
-      if (stealable && dBall < PLAYER.tackleRange) {
-        // Bal binnen bereik: win 'm (kans schaalt met tackling).
+      if (stealable && dBall < PLAYER.tackleRange * 0.8) {
         const owner = this.byId(this.ball.ownerId);
-        const success =
-          !owner ||
-          owner.side !== p.side ||
-          this.rng.chance(0.55 + (p.stats.tackling - 50) / 180);
-        if (success) {
-          const dir = dirTo(p, this.ball.pos);
-          kickBall(this.ball, { dir, power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
-        }
-      } else if (stealable) {
-        // Bal niet bij de tackle: raak je een tegenstander -> overtreding.
-        const victim = this.nearestOpponentWithinTackle(p);
-        if (victim) {
-          this.pendingFoul = { spot: { ...victim.pos }, side: victim.side };
+        if (!owner || owner.side !== p.side || this.rng.chance(0.65 + (p.stats.tackling - 50) / 180)) {
+          kickBall(this.ball, { dir: dirTo(p, this.ball.pos), power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
         }
       }
     }
   }
 
-  /** Dichtstbijzijnde tegenstander binnen tackle-bereik (voor overtredingen). */
-  private nearestOpponentWithinTackle(p: PlayerEntity): PlayerEntity | null {
-    let best: PlayerEntity | null = null;
-    let bestD: number = PLAYER.tackleRange;
+  /**
+   * Contact-afhandeling tijdens een sliding tackle (zowel op het inzet-moment als
+   * onderweg). Raakt de glijder de BAL -> hij wint 'm (kans schaalt met tackling).
+   * Raakt hij (zonder bal) het LIJF van een tegenstander -> overtreding. Eén keer
+   * per slide (slideTouched), zodat het echt op contact gebeurt en niet "te snel".
+   */
+  private resolveSlideContact(p: PlayerEntity): void {
+    if (p.slideTouched) return;
+    const stealable = !this.ballProtectedFor || this.ballProtectedFor === p.side;
+    if (!stealable) return;
+    const dBall = dist(p.pos, this.ball.pos);
+    if (dBall < PLAYER.tackleRange) {
+      p.slideTouched = true;
+      const owner = this.byId(this.ball.ownerId);
+      if (!owner || owner.side !== p.side || this.rng.chance(0.5 + (p.stats.tackling - 50) / 180)) {
+        kickBall(this.ball, { dir: dirTo(p, this.ball.pos), power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
+      }
+      return;
+    }
+    // Contact-afstand ~ twee lijven die elkaar raken + het gestrekte glij-been.
+    const contact = PLAYER.radius * 2 + 0.25;
     for (const o of this.players) {
       if (o.side === p.side) continue;
-      const d = dist(o.pos, p.pos);
-      if (d < bestD) {
-        bestD = d;
-        best = o;
+      if (dist(o.pos, p.pos) < contact) {
+        p.slideTouched = true;
+        this.pendingFoul = { spot: { ...o.pos }, side: o.side };
+        return;
       }
     }
-    return best;
   }
 
   /** Spelers kunnen niet overlappen; ze duwen elkaar (tacklende glijdt door). */
@@ -832,10 +874,10 @@ export class MatchSim {
     const n = this.players.length;
     for (let i = 0; i < n; i++) {
       const a = this.players[i]!;
-      if (a.state === "tackle") continue;
+      if (a.state === "slide") continue; // inglijder glijdt door
       for (let j = i + 1; j < n; j++) {
         const b = this.players[j]!;
-        if (b.state === "tackle") continue;
+        if (b.state === "slide") continue;
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const d = Math.hypot(dx, dy);

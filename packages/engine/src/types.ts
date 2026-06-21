@@ -26,6 +26,7 @@ export type PlayerActState =
   | "run"
   | "kick"
   | "tackle"
+  | "slide"
   | "header"
   | "recover"
   | "dive";
@@ -62,6 +63,8 @@ export interface PlayerEntity {
   z?: number;
   /** Verticale snelheid voor de duik-sprong (units/s). */
   vz?: number;
+  /** Tijdens een sliding tackle al bal/man geraakt? (voorkomt dubbele afhandeling). */
+  slideTouched?: boolean;
 }
 
 /** De bal als spel-specifiek kinematisch object. */

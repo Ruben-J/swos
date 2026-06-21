@@ -20,7 +20,10 @@ export interface PlayerCommand {
   move: Vec2;
   sprint: boolean;
   kick: KickRequest | null;
+  /** Staande tackle: veilig poken naar de bal, maakt vrijwel nooit overtreding. */
   tackle: boolean;
+  /** Sliding tackle: inglijden met impuls; wint de bal of maakt een overtreding. */
+  slide: boolean;
 }
 
 export const noCommand = (): PlayerCommand => ({
@@ -28,6 +31,7 @@ export const noCommand = (): PlayerCommand => ({
   sprint: false,
   kick: null,
   tackle: false,
+  slide: false,
 });
 
 // --- Geometrie-helpers ---------------------------------------------------
@@ -713,14 +717,31 @@ function onBallCommand(
     return cmd;
   }
 
-  // Dribbel richting doel; wijk licht uit bij directe druk.
-  let dir = goalDir;
-  if (pressure) {
-    const away = normalize({ x: player.pos.x - pressure.pos.x, y: player.pos.y - pressure.pos.y });
-    dir = normalize({ x: dir.x + away.x * 0.6, y: dir.y + away.y * 0.6 });
+  // Dribbel naar de meest OPEN richting — niet per se vooruit. Bias naar het doel,
+  // maar onder druk/afgesloten lijn mag de speler opzij of zelfs even terugdraaien
+  // om de verdediger te ontwijken. Evalueer een waaier rond de doelrichting en kies
+  // de richting met de meeste ruimte (en wat doel-voorkeur).
+  const goalAng = Math.atan2(goalDir.y, goalDir.x);
+  let bestDir = goalDir;
+  let bestScore = -Infinity;
+  for (let k = -4; k <= 4; k++) {
+    const a = goalAng + (k * Math.PI) / 6; // -120°..+120° in stappen van 30°
+    const d = { x: Math.cos(a), y: Math.sin(a) };
+    const probe = { x: player.pos.x + d.x * 6, y: player.pos.y + d.y * 6 };
+    let nearOpp = Infinity;
+    for (const o of opponents) nearOpp = Math.min(nearOpp, dist(o.pos, probe));
+    let score = Math.min(nearOpp, 8) + Math.cos(a - goalAng) * 3; // ruimte + doel-bias
+    if (probe.x < 2 || probe.x > PITCH.width - 2 || probe.y < 2 || probe.y > PITCH.height - 2) {
+      score -= 6; // niet het veld uit dribbelen
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestDir = d;
+    }
   }
-  cmd.move = dir;
-  cmd.sprint = !pressure;
+  cmd.move = bestDir;
+  // Alleen sprinten als hij ongeveer vooruit gaat en niet onder directe druk staat.
+  cmd.sprint = !pressure && bestDir.x * goalDir.x + bestDir.y * goalDir.y > 0.5;
   return cmd;
 }
 
@@ -733,14 +754,33 @@ function keeperCommand(
 ): PlayerCommand {
   const cmd = noCommand();
 
-  // Bal in handen -> uittrappen richting de andere helft (clearance).
+  // Bal in handen -> RUSTIG uitspelen: zoek een vrije teamgenoot (geen tegenstander
+  // dichtbij) en rol/pass 'm laag in, zodat de tegenpartij 'm niet meteen afpakt.
+  // Is er niemand vrij, dan een klare hoge bal naar voren.
   if (ball.ownerId === gk.id) {
-    cmd.kick = {
-      dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }),
-      power: 30,
-      loft: 6,
-      curve: 0,
-    };
+    let best: PlayerEntity | null = null;
+    let bestScore = -Infinity;
+    for (const mate of players) {
+      if (mate.id === gk.id || mate.side !== gk.side) continue;
+      let nearOpp = Infinity;
+      for (const o of players) {
+        if (o.side !== gk.side) nearOpp = Math.min(nearOpp, dist(o.pos, mate.pos));
+      }
+      if (nearOpp < 6) continue; // gedekt -> niet inspelen
+      const d = dist(gk.pos, mate.pos);
+      if (d > 45) continue; // te ver voor een gerichte, lage uitworp/pass
+      const score = Math.min(nearOpp, 14) - Math.abs(d - 18) * 0.2; // ruim + op afstand
+      if (score > bestScore) {
+        bestScore = score;
+        best = mate;
+      }
+    }
+    if (best) {
+      const d = dist(gk.pos, best.pos);
+      cmd.kick = { dir: dirTo(gk, best.pos), power: clamp(10 + d * 0.45, 12, 28), loft: 0, curve: 0, targetId: best.id };
+    } else {
+      cmd.kick = { dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }), power: 32, loft: 7, curve: 0 };
+    }
     return cmd;
   }
 

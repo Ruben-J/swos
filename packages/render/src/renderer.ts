@@ -644,6 +644,30 @@ export class MatchRenderer {
     g.circle(3.7, -2.3, 1.4).fill(look.skin);
   }
 
+  /**
+   * Teken een inglijdende veldspeler: liggend langs +x (container-rotatie zet +x
+   * op de glij-richting), één been gestrekt naar voren (de tackle), het andere
+   * gebogen, romp + hoofd erachter. Leest als een sliding tackle.
+   */
+  private drawPlayerSlide(g: Graphics, look: PersonLook): void {
+    g.clear();
+    const dark = 0x101010;
+    const out = { width: 0.6, color: dark, alpha: 0.6 } as const;
+    // Gestrekt tackle-been naar voren (+x), schoen aan het eind.
+    g.rect(0.5, -0.6, 6.2, 1.4).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
+    g.circle(7.0, 0.1, 1.1).fill(0x161616);
+    // Gebogen tweede been.
+    g.rect(-1.2, 1.0, 4.2, 1.3).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
+    // Broek + liggende romp (shirt).
+    g.ellipse(-2.4, -0.2, 2.1, 2.0).fill(look.shorts).stroke(out);
+    g.ellipse(-4.6, -0.6, 3.2, 2.4).fill(look.shirt).stroke(out);
+    // Steunarm naar achter.
+    g.rect(-7.2, -1.8, 2.6, 1.0).fill(look.shirt).stroke({ width: 0.5, color: dark, alpha: 0.5 });
+    // Hoofd achteraan.
+    g.circle(-6.6, -1.0, 2.2).fill(look.hair).stroke({ width: 0.7, color: dark, alpha: 0.6 });
+    g.circle(-6.0, -0.4, 1.3).fill(look.skin);
+  }
+
   /** Projecteer een pitch-positie (units) naar schermpixels met dezelfde
    *  transform als `world` (rotatie + TILT-squash), maar zónder de sprites zelf
    *  te vervormen — die plaatsen we hier op de uitkomst. */
@@ -749,6 +773,12 @@ export class MatchRenderer {
         node.body.rotation = da;
         node.body.position.set(0, -p.z * u);
         node.shadow.scale.set(1 / (1 + p.z * 0.5));
+      } else if (p.state === "slide") {
+        // Sliding tackle: liggend langs de glij-richting, been gestrekt naar voren.
+        this.drawPlayerSlide(node.body, node.look);
+        node.body.rotation = Math.atan2(node.diveDir.y, node.diveDir.x);
+        node.body.position.set(0, 0);
+        node.shadow.scale.set(1);
       } else {
         node.body.rotation = 0;
         node.body.position.set(0, 0);
@@ -817,8 +847,14 @@ export class MatchRenderer {
     this.ball.rotation = 0;
     this.ball.scale.set(zoom * (1 + buz * 0.12));
     // Bal diepte-sorteren op zijn grondpositie (+kleine hoogte-bias), zodat een
-    // speler die ervóór staat de bal afdekt. Vastgehouden bal net vóór de houder.
-    this.ball.zIndex = heldBall ? heldBall.y + 3 : ground.y + buz * u * 0.5;
+    // speler die ervóór staat de bal afdekt. Bij een ingooi hangt de bal boven het
+    // hoofd -> vóór de werper; in de keepershanden tegen de borst -> ACHTER de
+    // keeper (zijn lijf dekt 'm af).
+    this.ball.zIndex = heldBall
+      ? heldBall.mode === "throw"
+        ? heldBall.y + 3
+        : heldBall.y - 3
+      : ground.y + buz * u * 0.5;
 
     // Richt-pijltje voor een mikbare hervatting (hoek/vrije trap/penalty).
     this.aimArrow.clear();
