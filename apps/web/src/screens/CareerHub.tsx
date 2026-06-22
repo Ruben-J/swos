@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { Rng, hashSeed, type CareerSave, type Match, type Player, type TrainingFocus, type UUID } from "@pitch/shared";
 import { FORMATIONS } from "@pitch/engine";
 import {
@@ -6,6 +6,7 @@ import {
   buyPlayer,
   canBuy,
   divisionStandings,
+  effectiveTransferBudget,
   formatShort,
   acceptJobOffer,
   computeStandings,
@@ -62,6 +63,160 @@ const TRAINING_OPTS: { id: TrainingFocus; label: string; hint: string; detail: s
   },
 ];
 
+type TabKey =
+  | "overzicht"
+  | "selectie"
+  | "tactiek"
+  | "training"
+  | "jeugd"
+  | "kalender"
+  | "transfers"
+  | "competities"
+  | "financien";
+
+// Verticale icoon-navigatie (SVG-paden, stroke = currentColor).
+function NavIcon({ d }: { d: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="22"
+      height="22"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      dangerouslySetInnerHTML={{ __html: d }}
+    />
+  );
+}
+
+const NAV: { key: TabKey; label: string; icon: string }[] = [
+  { key: "overzicht", label: "Hub", icon: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>' },
+  {
+    key: "selectie",
+    label: "Selectie",
+    icon: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 14.4A5.5 5.5 0 0 1 20.5 19.5"/>',
+  },
+  { key: "tactiek", label: "Tactiek", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 12h16"/><circle cx="12" cy="12" r="2.4"/>' },
+  {
+    key: "training",
+    label: "Training",
+    icon: '<path d="M6.5 6.5l11 11"/><rect x="2.5" y="8.5" width="4" height="7" rx="1" transform="rotate(-45 4.5 12)"/><rect x="17.5" y="8.5" width="4" height="7" rx="1" transform="rotate(-45 19.5 12)"/>',
+  },
+  { key: "jeugd", label: "Jeugd", icon: '<path d="M12 3l2.5 5.5 6 .6-4.5 4 1.3 5.9L12 21l-5.3 3 1.3-5.9-4.5-4 6-.6z"/>' },
+  { key: "kalender", label: "Kalender", icon: '<rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17M8 3v3M16 3v3"/>' },
+  { key: "transfers", label: "Transfers", icon: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>' },
+  {
+    key: "competities",
+    label: "Comp.",
+    icon: '<path d="M7 4h10v3a5 5 0 0 1-10 0z"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3M9.5 15h5l.7 4h-6.4z"/>',
+  },
+  {
+    key: "financien",
+    label: "Geld",
+    icon: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+  },
+];
+const SAVE_ICON = '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>';
+
+// Initialen uit een naam ("J. de Vries" -> "JV").
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .map((w) => w[0])
+      .filter(Boolean)
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "M"
+  );
+}
+
+// Eén ploeg in het VS-blok van de wedstrijdkaart: clubembleem + naam + stand.
+function TeamBlock({
+  save,
+  teamId,
+  myTeamId,
+  standRow,
+  away,
+}: {
+  save: CareerSave;
+  teamId: UUID;
+  myTeamId: UUID;
+  standRow: (id: UUID) => { rank: number; points: number } | undefined;
+  away?: boolean;
+}) {
+  const team = save.worldState.teams.find((t) => t.id === teamId)!;
+  const row = standRow(teamId);
+  const sub = row ? `${row.rank}e · ${row.points} ptn` : "—";
+  const mine = teamId === myTeamId;
+  const crest = (
+    <div
+      className="ch-crest"
+      style={{
+        background: `linear-gradient(135deg, ${team.colors.primary}, ${team.colors.secondary})`,
+        color: team.colors.secondary,
+      }}
+    >
+      {team.shortName.slice(0, 3).toUpperCase()}
+    </div>
+  );
+  const text = (
+    <div style={{ minWidth: 0 }}>
+      <div className="ch-vsname" style={mine ? { color: "#f4f6ef" } : undefined}>
+        {team.name}
+      </div>
+      <div className="ch-vssub">{sub}</div>
+    </div>
+  );
+  return (
+    <div className={`ch-vsteam${away ? " away" : ""}`}>
+      {away ? text : crest}
+      {away ? crest : text}
+    </div>
+  );
+}
+
+// Plaats de basiself op een verticaal mini-veld (100×140) op basis van de
+// FORMATIE: GK onderaan, aanval bovenaan. Per linie sorteren we op vleugel
+// (RB/RW rechts, LB/LW links) zodat een 4-4-2 er echt als 4-4-2 uitziet.
+function pitchSpots(
+  formationName: string,
+  lineup: UUID[],
+  slots: string[],
+): { id: UUID; x: number; y: number }[] {
+  const segs = formationName.split("-").map((n) => parseInt(n, 10)).filter((n) => n > 0);
+  const lineSizes = [1, ...(segs.length ? segs : [4, 4, 2])];
+  const nLines = lineSizes.length;
+  const yAt = (line: number): number => 122 - (line / (nLines - 1)) * 96;
+  const xHint = (pos: string): number =>
+    pos === "RB" || pos === "RW" ? 1 : pos === "LB" || pos === "LW" ? -1 : 0;
+  const out: { id: UUID; x: number; y: number }[] = [];
+  let idx = 0;
+  lineSizes.forEach((size, line) => {
+    const group: { id: UUID; slot: string }[] = [];
+    for (let k = 0; k < size && idx < lineup.length; k++, idx++) {
+      group.push({ id: lineup[idx]!, slot: slots[idx] ?? "CM" });
+    }
+    group.sort((a, b) => xHint(a.slot) - xHint(b.slot));
+    const n = group.length;
+    const spacing = n > 1 ? Math.min(20, 64 / (n - 1)) : 0;
+    group.forEach((g, i) => {
+      out.push({ id: g.id, x: 50 + (i - (n - 1) / 2) * spacing, y: yAt(line) });
+    });
+  });
+  return out;
+}
+
+// Disckleur per linie, in lijn met het ontwerp.
+function posMark(pos: string): string {
+  if (pos === "GK") return "#ffd23e";
+  if (pos === "RB" || pos === "LB" || pos === "CB") return "#5b9bd6";
+  if (pos === "DM" || pos === "CM" || pos === "AM") return "#b6ff3a";
+  return "#ff7a5b";
+}
+
 interface Props {
   save: CareerSave;
   onUpdate: (save: CareerSave) => void;
@@ -77,9 +232,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const myDivision = ws.divisions.find((d) => d.id === myTeam.divisionId)!;
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
-  const [tab, setTab] = useState<
-    "overzicht" | "selectie" | "tactiek" | "training" | "jeugd" | "kalender" | "transfers" | "competities" | "financien"
-  >("overzicht");
+  const [tab, setTab] = useState<TabKey>("overzicht");
 
   const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "";
   const nextMatch = useMemo(() => teamNextMatch(ws.matches, myTeamId), [ws.matches, myTeamId]);
@@ -96,7 +249,6 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   }, [ws.players, myTeamId]);
 
   const teamName = (id: UUID): string => ws.teams.find((t) => t.id === id)?.name ?? "?";
-  const teamShort = (id: UUID): string => ws.teams.find((t) => t.id === id)?.shortName ?? "?";
 
   const myResults = useMemo(
     () =>
@@ -136,81 +288,72 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const promoCut = myDivision.tier > 1 ? myDivision.promotionSlots : 0;
   const relCut = myDivision.relegationSlots;
 
+  const mgrIni = initials(save.manager.name);
+  const standRow = (id: UUID) => standings.find((r) => r.teamId === id);
+  const homeStadium = (nextMatch && ws.teams.find((t) => t.id === nextMatch.homeTeamId)?.stadium) || {
+    name: "—",
+    capacity: 0,
+  };
+
   return (
     <div className="career-hub">
-      <header className="ch-head">
-        <div className="ch-club">
-          <span className="ch-chip" style={{ background: myTeam.colors.primary }} />
-          <div>
-            <div className="ch-club-name">{myTeam.name}</div>
-            <div className="ch-sub">
-              {myDivision.name} · {myDivision.countryName} · seizoen {season.label}
+      <aside className="ch-nav">
+        <div
+          className="ch-nav-logo"
+          style={{
+            background: `linear-gradient(135deg, ${myTeam.colors.primary}, ${myTeam.colors.secondary})`,
+            color: myTeam.colors.secondary,
+          }}
+        >
+          {myTeam.shortName.slice(0, 3).toUpperCase()}
+        </div>
+        <div className="ch-nav-items">
+          {NAV.map((item) => (
+            <button
+              key={item.key}
+              className={`ch-navbtn${tab === item.key ? " sel" : ""}`}
+              onClick={() => setTab(item.key)}
+              title={item.label}
+            >
+              <NavIcon d={item.icon} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <button className="ch-nav-save" onClick={onExit} title="Opslaan & terug">
+          <NavIcon d={SAVE_ICON} />
+          <span>Opslaan</span>
+        </button>
+      </aside>
+
+      <div className="ch-main">
+        <header className="ch-head">
+          <div className="ch-club">
+            <span className="ch-chip" style={{ background: myTeam.colors.primary }} />
+            <div>
+              <div className="ch-sub">
+                {myDivision.name} · {myDivision.countryName} · seizoen {season.label}
+              </div>
+              <div className="ch-club-name">{myTeam.name}</div>
             </div>
           </div>
-        </div>
-        <div className="ch-right">
-          <div className="ch-tabs">
-            <button
-              className={`ch-tab${tab === "overzicht" ? " sel" : ""}`}
-              onClick={() => setTab("overzicht")}
-            >
-              Overzicht
-            </button>
-            <button
-              className={`ch-tab${tab === "selectie" ? " sel" : ""}`}
-              onClick={() => setTab("selectie")}
-            >
-              Selectie
-            </button>
-            <button
-              className={`ch-tab${tab === "tactiek" ? " sel" : ""}`}
-              onClick={() => setTab("tactiek")}
-            >
-              Tactiek
-            </button>
-            <button
-              className={`ch-tab${tab === "training" ? " sel" : ""}`}
-              onClick={() => setTab("training")}
-            >
-              Training
-            </button>
-            <button
-              className={`ch-tab${tab === "jeugd" ? " sel" : ""}`}
-              onClick={() => setTab("jeugd")}
-            >
-              Jeugd
-            </button>
-            <button
-              className={`ch-tab${tab === "kalender" ? " sel" : ""}`}
-              onClick={() => setTab("kalender")}
-            >
-              Kalender
-            </button>
-            <button
-              className={`ch-tab${tab === "competities" ? " sel" : ""}`}
-              onClick={() => setTab("competities")}
-            >
-              Competities
-            </button>
-            <button
-              className={`ch-tab${tab === "transfers" ? " sel" : ""}`}
-              onClick={() => setTab("transfers")}
-            >
-              Transfers
-            </button>
-            <button
-              className={`ch-tab${tab === "financien" ? " sel" : ""}`}
-              onClick={() => setTab("financien")}
-            >
-              Financiën
-            </button>
+          <div className="ch-right">
+            {nextMatch && (
+              <div className="ch-matchday">
+                <span className="dot" />
+                <span>Matchday · {formatShort(nextMatch.date)}</span>
+              </div>
+            )}
+            <div className="ch-date">{formatShort(season.currentDate)}</div>
+            <div className="ch-manager">
+              <span className="ch-mgr-ini">{mgrIni}</span>
+              <div>
+                <div className="ch-mgr-name">{save.manager.name}</div>
+                <div className="ch-mgr-role">Manager</div>
+              </div>
+            </div>
           </div>
-          <div className="ch-date">{formatShort(season.currentDate)}</div>
-          <button className="btn" onClick={onExit}>
-            Opslaan &amp; terug
-          </button>
-        </div>
-      </header>
+        </header>
 
       {tab === "selectie" && (
         <div className="ch-body">
@@ -255,8 +398,8 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
       {tab === "transfers" && <TransfersView save={save} onUpdate={onUpdate} />}
       {tab === "financien" && <FinancesView save={save} />}
 
-      <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
-        <section className="ch-panel ch-next">
+      <div className="ch-body ch-overview" style={tab !== "overzicht" ? { display: "none" } : undefined}>
+        <div className="ch-ov-left">
           {offers.length > 0 && (
             <div className="ch-offers">
               <span className="ch-offers-title">📨 Baanaanbiedingen</span>
@@ -276,59 +419,36 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               </button>
             </div>
           )}
-          <div className={`ch-objective${objective.met ? " ok" : " behind"}`}>
-            <span className="ch-obj-label">Bestuursdoel</span>
-            <span className="ch-obj-text">{objective.text}</span>
-            <span className="ch-obj-rank">
-              nu {objective.currentRank ?? "?"}e · doel ≤ {objective.targetRank}e
-            </span>
-          </div>
-          <h2>Volgende wedstrijd</h2>
+
           {nextMatch ? (
-            <>
-              <div className="ch-fixture">
-                <span className={nextMatch.homeTeamId === myTeamId ? "ch-strong" : ""}>
-                  {teamName(nextMatch.homeTeamId)}
-                </span>
-                <span className="ch-vs">vs</span>
-                <span className={nextMatch.awayTeamId === myTeamId ? "ch-strong" : ""}>
-                  {teamName(nextMatch.awayTeamId)}
+            <div className="ch-next-card">
+              <div className="ch-next-top">
+                <span>Volgende wedstrijd · {compName(nextMatch.competitionId)}</span>
+                <span className="muted">
+                  {nextMatch.roundLabel} · {nextMatch.homeTeamId === myTeamId ? "thuis" : "uit"}
                 </span>
               </div>
-              <div className="ch-fixture-meta">
-                {compName(nextMatch.competitionId)} · {nextMatch.roundLabel} · {formatShort(nextMatch.date)}
+              <div className="ch-vsrow">
+                <TeamBlock save={save} teamId={nextMatch.homeTeamId} myTeamId={myTeamId} standRow={standRow} />
+                <span className="ch-vsx">VS</span>
+                <TeamBlock save={save} teamId={nextMatch.awayTeamId} myTeamId={myTeamId} standRow={standRow} away />
+              </div>
+              <div className="ch-led">
+                <span className="ch-led-seg blink">{formatShort(nextMatch.date).toUpperCase()}</span>
+                <span className="ch-led-div" />
+                <span className="ch-led-seg dim">{homeStadium.name.toUpperCase()}</span>
               </div>
               <div className="ch-actions">
                 <button className="btn primary" onClick={() => onPlayMatch(nextMatch)}>
-                  Speel wedstrijd
+                  ▶ Speel wedstrijd
                 </button>
                 <button className="btn" onClick={simulate}>
-                  Simuleer speeldag
+                  Simuleer
                 </button>
               </div>
-              <h3 className="ch-recent-title">
-                Ook deze speeldag — {compName(nextMatch.competitionId)}
-              </h3>
-              <ul className="ch-dayfix">
-                {ws.matches
-                  .filter(
-                    (m) =>
-                      m.competitionId === nextMatch.competitionId &&
-                      m.date === nextMatch.date &&
-                      m.id !== nextMatch.id,
-                  )
-                  .slice(0, 8)
-                  .map((m) => (
-                    <li key={m.id}>
-                      <span className="ch-dayfix-h">{teamShort(m.homeTeamId)}</span>
-                      <span className="ch-vs">–</span>
-                      <span className="ch-dayfix-a">{teamShort(m.awayTeamId)}</span>
-                    </li>
-                  ))}
-              </ul>
-            </>
+            </div>
           ) : done ? (
-            <div className="ch-season-end">
+            <div className="ch-panel ch-season-end">
               <div className="ch-done">
                 Seizoen afgelopen — kampioen <strong>{teamName(standings[0]?.teamId ?? "")}</strong>.
               </div>
@@ -342,78 +462,114 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
               </button>
             </div>
           ) : (
-            <div className="ch-season-end">
-              <div className="ch-done">
-                Geen eigen wedstrijd meer, maar er lopen nog toernooien.
-              </div>
+            <div className="ch-panel ch-season-end">
+              <div className="ch-done">Geen eigen wedstrijd meer, maar er lopen nog toernooien.</div>
               <button className="btn primary" onClick={simulateRest}>
                 Speel resterende wedstrijden
               </button>
             </div>
           )}
 
-          <h3 className="ch-recent-title">Recente uitslagen</h3>
-          <ul className="ch-recent">
-            {myResults.map((m) => {
-              const home = m.homeTeamId === myTeamId;
-              const gf = home ? m.score.home : m.score.away;
-              const ga = home ? m.score.away : m.score.home;
-              const res = gf > ga ? "W" : gf < ga ? "V" : "G";
-              const opp = teamShort(home ? m.awayTeamId : m.homeTeamId);
-              return (
-                <li key={m.id} className={`ch-res ch-res-${res}`}>
-                  <span className="ch-res-tag">{res}</span>
-                  <span>{home ? "thuis" : "uit"} vs {opp}</span>
-                  <span className="ch-res-score">
-                    {gf}–{ga}
-                  </span>
-                </li>
-              );
-            })}
-            {myResults.length === 0 && <li className="ch-res">Nog niets gespeeld.</li>}
-          </ul>
-        </section>
+          <div className="ch-ov-cols">
+            <section className="ch-panel ch-sub">
+              <h3 className="ch-recent-title">Recente uitslagen</h3>
+              <ul className="ch-recent">
+                {myResults.map((m) => {
+                  const home = m.homeTeamId === myTeamId;
+                  const gf = home ? m.score.home : m.score.away;
+                  const ga = home ? m.score.away : m.score.home;
+                  const res = gf > ga ? "W" : gf < ga ? "V" : "G";
+                  const opp = teamName(home ? m.awayTeamId : m.homeTeamId);
+                  return (
+                    <li key={m.id} className={`ch-res ch-res-${res}`}>
+                      <span className="ch-res-tag">{res}</span>
+                      <span className="ch-res-opp">
+                        <span className="ch-res-ha">{home ? "thuis" : "uit"}</span> {opp}
+                      </span>
+                      <span className="ch-res-score">
+                        {gf}–{ga}
+                      </span>
+                    </li>
+                  );
+                })}
+                {myResults.length === 0 && <li className="ch-res">Nog niets gespeeld.</li>}
+              </ul>
+            </section>
+            {nextMatch && (
+              <section className="ch-panel ch-sub">
+                <h3 className="ch-recent-title">Ook deze speeldag</h3>
+                <ul className="ch-dayfix">
+                  {ws.matches
+                    .filter(
+                      (m) =>
+                        m.competitionId === nextMatch.competitionId &&
+                        m.date === nextMatch.date &&
+                        m.id !== nextMatch.id,
+                    )
+                    .slice(0, 7)
+                    .map((m) => (
+                      <li key={m.id}>
+                        <span className="ch-dayfix-h">{teamName(m.homeTeamId)}</span>
+                        <span className="ch-vs">–</span>
+                        <span className="ch-dayfix-a">{teamName(m.awayTeamId)}</span>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        </div>
 
-        <section className="ch-panel ch-table">
-          <h2>{myDivision.name}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th className="ch-tn">Club</th>
-                <th>G</th>
-                <th>W</th>
-                <th>L</th>
-                <th>V</th>
-                <th>DS</th>
-                <th>Ptn</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((r) => {
-                const promo = promoCut > 0 && r.rank <= promoCut;
-                const releg = relCut > 0 && r.rank > standings.length - relCut;
-                return (
-                  <tr
-                    key={r.teamId}
-                    className={`${r.teamId === myTeamId ? "ch-me" : ""}${promo ? " ch-promo" : ""}${
-                      releg ? " ch-releg" : ""
-                    }`}
-                  >
-                    <td>{r.rank}</td>
-                    <td className="ch-tn">{teamName(r.teamId)}</td>
-                    <td>{r.played}</td>
-                    <td>{r.won}</td>
-                    <td>{r.drawn}</td>
-                    <td>{r.lost}</td>
-                    <td>{r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}</td>
-                    <td className="ch-pts">{r.points}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+        <div className="ch-ov-right">
+          <div className={`ch-objective${objective.met ? " ok" : " behind"}`}>
+            <span className="ch-obj-label">Bestuursdoel</span>
+            <span className="ch-obj-text">{objective.text}</span>
+            <span className="ch-obj-rank">
+              nu {objective.currentRank ?? "?"}e · doel ≤ {objective.targetRank}e
+            </span>
+          </div>
+          <section className="ch-panel ch-table">
+            <h2>{myDivision.name}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th className="ch-tn">Club</th>
+                  <th>G</th>
+                  <th>W</th>
+                  <th>L</th>
+                  <th>V</th>
+                  <th>DS</th>
+                  <th>Ptn</th>
+                </tr>
+              </thead>
+              <tbody>
+                {standings.map((r) => {
+                  const promo = promoCut > 0 && r.rank <= promoCut;
+                  const releg = relCut > 0 && r.rank > standings.length - relCut;
+                  return (
+                    <tr
+                      key={r.teamId}
+                      className={`${r.teamId === myTeamId ? "ch-me" : ""}${promo ? " ch-promo" : ""}${
+                        releg ? " ch-releg" : ""
+                      }`}
+                    >
+                      <td>{r.rank}</td>
+                      <td className="ch-tn">{teamName(r.teamId)}</td>
+                      <td>{r.played}</td>
+                      <td>{r.won}</td>
+                      <td>{r.drawn}</td>
+                      <td>{r.lost}</td>
+                      <td>{r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}</td>
+                      <td className="ch-pts">{r.points}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </div>
       </div>
     </div>
   );
@@ -472,6 +628,7 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
 
   const [dragging, setDragging] = useState<string | null>(null);
   const [overSlot, setOverSlot] = useState<number | null>(null);
+  const [sub, setSub] = useState<"selectie" | "stijl">("selectie");
 
   const tac = save.manager.tactics;
   const formation = tac?.formation || teamFormationName(myId);
@@ -566,114 +723,169 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
     setDragging(null);
   };
 
-  const playerCard = (p: Player | undefined): ReactNode => {
-    if (!p) return <span className="tac-empty">leeg</span>;
-    const st = statusLabel(p);
-    return (
-      <>
-        <span className="tac-pc-pos">{p.preferredPositions[0]}</span>
-        <span className="tac-pc-name">{p.firstName[0]}. {p.lastName}</span>
-        {st && <span className="tac-pc-st">{st}</span>}
-        <span className="tac-pc-ovr">{playerOverall(p)}</span>
-      </>
-    );
-  };
+  const spots = pitchSpots(formation, lineup, slots);
 
   return (
-    <div className="ch-body ch-tacticstab">
-      <section className="ch-panel ch-tac-left">
-        <div className="comp-head">
-          <h2>Tactiek</h2>
-          <button className="ch-offer-decline" onClick={reset}>Herstel automatisch</button>
-        </div>
-        <div className="tac-formrow">
-          <span className="ch-train-label">Formatie</span>
-          <div className="ch-train-opts">
+    <div className="ch-body ch-tactiek">
+      <section className="ch-panel ch-tac-field">
+        <div className="tac-head">
+          <div>
+            <div className="tac-head-sub">Opstelling · {formation} · {lineup.length} spelers</div>
+            <h2>OPSTELLING</h2>
+          </div>
+          <div className="tac-forms">
             {Object.keys(FORMATIONS).map((f) => (
               <button
                 key={f}
-                className={`ch-train-btn${f === formation ? " sel" : ""}`}
+                className={`tac-form-btn${f === formation ? " sel" : ""}`}
                 onClick={() => changeFormation(f)}
               >
                 {f}
               </button>
             ))}
+            <button className="tac-form-btn tac-reset" onClick={reset} title="Herstel automatisch">
+              ↺
+            </button>
           </div>
         </div>
 
-        <h3 className="ch-recent-title">Basiself — sleep om te wisselen</h3>
-        <ol className="tac-lineup">
-          {slots.map((slot, i) => {
-            const p = playerById(lineup[i] ?? "");
-            const st = p ? statusLabel(p) : null;
+        <div className="tac-pitch">
+          <svg className="tac-pitch-lines" viewBox="0 0 100 140" preserveAspectRatio="none">
+            {[1, 3, 5].map((i) => (
+              <rect key={i} className="tp-stripe" x="0" y={i * 20} width="100" height="20" />
+            ))}
+            <rect className="tp-line" x="3" y="3" width="94" height="134" rx="2" />
+            <line className="tp-line" x1="3" y1="70" x2="97" y2="70" />
+            <circle className="tp-line" cx="50" cy="70" r="11" />
+            <circle cx="50" cy="70" r="0.9" fill="rgba(255,255,255,.55)" />
+            <rect className="tp-line" x="28" y="3" width="44" height="20" />
+            <rect className="tp-line" x="40" y="3" width="20" height="8" />
+            <rect className="tp-line" x="28" y="117" width="44" height="20" />
+            <rect className="tp-line" x="40" y="129" width="20" height="8" />
+          </svg>
+          {spots.map((s) => {
+            const p = playerById(s.id);
+            if (!p) return null;
+            const i = lineup.indexOf(s.id);
+            const pos = p.preferredPositions[0] ?? "CM";
+            const st = statusLabel(p);
             return (
-              <li
-                key={i}
-                className={`${st ? "tac-unavail" : ""}${overSlot === i ? " tac-over" : ""}`}
+              <div
+                key={s.id}
+                className={`tac-marker${st ? " unavail" : ""}${dragging === `slot:${i}` ? " drag" : ""}${
+                  overSlot === i ? " over" : ""
+                }`}
+                style={{ left: `${s.x}%`, top: `${(s.y / 140) * 100}%` }}
+                draggable
+                onDragStart={onDragStart(`slot:${i}`)}
+                onDragEnd={() => { setDragging(null); setOverSlot(null); }}
                 onDragOver={allowDrop}
                 onDragEnter={() => setOverSlot(i)}
                 onDragLeave={() => setOverSlot((cur) => (cur === i ? null : cur))}
                 onDrop={dropOnSlot(i)}
+                title={`${p.firstName} ${p.lastName}${st ? ` · ${st}` : ""}`}
               >
-                <span className="tac-slot">{slot}</span>
-                <div
-                  className={`tac-pc${dragging === `slot:${i}` ? " tac-dragging" : ""}`}
-                  draggable
-                  onDragStart={onDragStart(`slot:${i}`)}
-                  onDragEnd={() => { setDragging(null); setOverSlot(null); }}
-                >
-                  {playerCard(p)}
-                </div>
-              </li>
+                <span className="tac-disc" style={{ background: posMark(pos) }}>
+                  {playerOverall(p)}
+                </span>
+                <span className="tac-mname">{p.lastName}</span>
+              </div>
             );
           })}
-        </ol>
+        </div>
+
+        <div className="tac-bench">
+          <div className="tac-bench-label">Wisselspelers — sleep naar het veld</div>
+          <div className="tac-bench-row">
+            {bench.map((p) => {
+              const st = statusLabel(p);
+              return (
+                <div
+                  key={p.id}
+                  className={`tac-chip${dragging === `bench:${p.id}` ? " drag" : ""}${st ? " unavail" : ""}`}
+                  draggable
+                  onDragStart={onDragStart(`bench:${p.id}`)}
+                  onDragEnd={() => { setDragging(null); setOverSlot(null); }}
+                  onDragOver={allowDrop}
+                  onDrop={dropOnBench(p.id)}
+                  title={`${p.firstName} ${p.lastName}${st ? ` · ${st}` : ""}`}
+                >
+                  <span className="tac-chip-pos">{p.preferredPositions[0]}</span>
+                  <span className="tac-chip-name">{p.lastName}</span>
+                  <span className="tac-chip-ovr">{playerOverall(p)}</span>
+                </div>
+              );
+            })}
+            {bench.length === 0 && <span className="ch-done">Geen reserves.</span>}
+          </div>
+        </div>
       </section>
 
-      <section className="ch-panel ch-tac-right">
-        <h2>Speelstijl</h2>
-        <div className="tac-sliders">
-          {SHAPE_SLIDERS.map((s) => (
-            <div key={s.key} className="tac-slider">
-              <div className="tac-slider-top">
-                <span>{s.label}</span>
-                <span className="tac-slider-val">{Math.round(shape[s.key] * 100)}</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={shape[s.key]}
-                onChange={(e) => setShape(s.key, parseFloat(e.target.value))}
-              />
-              <div className="tac-slider-ends">
-                <span>{s.lo}</span>
-                <span>{s.hi}</span>
-              </div>
-            </div>
-          ))}
+      <section className="ch-panel ch-tac-side">
+        <div className="tac-subtabs">
+          <button
+            className={`tac-subtab${sub === "selectie" ? " sel" : ""}`}
+            onClick={() => setSub("selectie")}
+          >
+            Selectie
+          </button>
+          <button
+            className={`tac-subtab${sub === "stijl" ? " sel" : ""}`}
+            onClick={() => setSub("stijl")}
+          >
+            Speelstijl
+          </button>
         </div>
-        <h3 className="ch-recent-title">Reservebank — sleep naar een plek</h3>
-        <ul className="tac-bench">
-          {bench.map((p) => (
-            <li
-              key={p.id}
-              className={dragging === `bench:${p.id}` ? "tac-dragging" : ""}
-              draggable
-              onDragStart={onDragStart(`bench:${p.id}`)}
-              onDragEnd={() => { setDragging(null); setOverSlot(null); }}
-              onDragOver={allowDrop}
-              onDrop={dropOnBench(p.id)}
-            >
-              <span className="tr-pos">{p.preferredPositions[0]}</span>
-              <span className="tr-name">{p.firstName[0]}. {p.lastName}</span>
-              <span className="ch-status">{statusLabel(p) ?? ""}</span>
-              <span className="tr-ovr">{playerOverall(p)}</span>
-            </li>
-          ))}
-          {bench.length === 0 && <li className="ch-done">Geen reserves.</li>}
-        </ul>
+
+        {sub === "selectie" ? (
+          <div className="tac-squad">
+            {[...squad]
+              .sort((a, b) => playerOverall(b) - playerOverall(a))
+              .map((p) => {
+                const st = statusLabel(p);
+                const starter = starters.has(p.id);
+                return (
+                  <div
+                    key={p.id}
+                    className={`tac-srow${starter ? " starter" : ""}${dragging === `bench:${p.id}` ? " drag" : ""}`}
+                    draggable
+                    onDragStart={onDragStart(`bench:${p.id}`)}
+                    onDragEnd={() => { setDragging(null); setOverSlot(null); }}
+                  >
+                    <span className="tac-spos">{p.preferredPositions[0]}</span>
+                    <span className="tac-sname">{p.firstName[0]}. {p.lastName}</span>
+                    {st && <span className="tac-sst ch-status">{st}</span>}
+                    <span className="tac-sovr" style={{ color: starter ? "var(--accent)" : "#cfd6c8" }}>
+                      {playerOverall(p)}
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        ) : (
+          <div className="tac-sliders">
+            {SHAPE_SLIDERS.map((s) => (
+              <div key={s.key} className="tac-slider">
+                <div className="tac-slider-top">
+                  <span>{s.label}</span>
+                  <span className="tac-slider-val">{Math.round(shape[s.key] * 100)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={shape[s.key]}
+                  onChange={(e) => setShape(s.key, parseFloat(e.target.value))}
+                />
+                <div className="tac-slider-ends">
+                  <span>{s.lo}</span>
+                  <span>{s.hi}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -836,7 +1048,6 @@ function CompetitionsView({ save }: { save: CareerSave }) {
   const ws = save.worldState;
   const myId = save.manager.currentTeamId;
   const teamName = (id: UUID): string => ws.teams.find((t) => t.id === id)?.name ?? "?";
-  const teamShort = (id: UUID): string => ws.teams.find((t) => t.id === id)?.shortName ?? "?";
 
   // Mijn hoofdcompetitie eerst, dan mijn beker/Europese toernooien.
   const myComps = useMemo(() => {
@@ -948,11 +1159,11 @@ function CompetitionsView({ save }: { save: CareerSave }) {
                       : "";
                   return (
                     <li key={m.id} className={mine ? "cd-mine" : ""}>
-                      <span className="cd-h">{teamShort(m.homeTeamId)}</span>
+                      <span className="cd-h">{teamName(m.homeTeamId)}</span>
                       <span className="cd-score">
                         {played ? `${m.score.home}–${m.score.away}${pens}` : "–"}
                       </span>
-                      <span className="cd-a">{teamShort(m.awayTeamId)}</span>
+                      <span className="cd-a">{teamName(m.awayTeamId)}</span>
                     </li>
                   );
                 })}
@@ -989,7 +1200,7 @@ function FinancesView({ save }: { save: CareerSave }) {
         <h2>Financiën</h2>
         <div className="fin-grid">
           <div><span>Saldo</span><strong>{money(fin.balance)}</strong></div>
-          <div><span>Transferbudget</span><strong>{money(fin.transferBudget)}</strong></div>
+          <div><span>Transferbudget</span><strong>{money(effectiveTransferBudget(save, myId))}</strong></div>
           <div><span>Loon/week</span><strong>{money(weeklyWageBill(save, myId))}</strong></div>
           <div><span>Sponsortier</span><strong>{fin.sponsorTier}/5</strong></div>
         </div>
@@ -1016,21 +1227,77 @@ function FinancesView({ save }: { save: CareerSave }) {
   );
 }
 
+// Kernattributen die in de transfer-rijen worden getoond (compact).
+const TR_STATS: { key: keyof Player["attributes"]; label: string }[] = [
+  { key: "pace", label: "SNH" },
+  { key: "shooting", label: "SCH" },
+  { key: "passing", label: "PAS" },
+  { key: "tackling", label: "TAC" },
+];
+
+function statVal(p: Player, key: keyof Player["attributes"]): string {
+  const v = p.attributes[key];
+  return typeof v === "number" ? String(Math.round(v)) : "–";
+}
+
+const AGE_OPTS = [
+  { v: 0, label: "Alle leeftijden" },
+  { v: 21, label: "t/m 21 jr" },
+  { v: 24, label: "t/m 24 jr" },
+  { v: 27, label: "t/m 27 jr" },
+  { v: 30, label: "t/m 30 jr" },
+];
+const PRICE_OPTS = [
+  { v: 0, label: "Alle prijzen" },
+  { v: 2_000_000, label: "≤ €2 mln" },
+  { v: 5_000_000, label: "≤ €5 mln" },
+  { v: 10_000_000, label: "≤ €10 mln" },
+  { v: 25_000_000, label: "≤ €25 mln" },
+];
+const SORT_OPTS = [
+  { v: "ovr", label: "Beste (OVR)" },
+  { v: "cheap", label: "Goedkoopst" },
+  { v: "exp", label: "Duurst" },
+  { v: "young", label: "Jongste" },
+];
+
 function TransfersView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: CareerSave) => void }) {
   const ws = save.worldState;
   const myId = save.manager.currentTeamId;
   const myTeam = ws.teams.find((t) => t.id === myId)!;
   const [posFilter, setPosFilter] = useState<string>("");
+  const [query, setQuery] = useState<string>("");
+  const [maxAge, setMaxAge] = useState<number>(0);
+  const [maxPrice, setMaxPrice] = useState<number>(0);
+  const [sort, setSort] = useState<"ovr" | "cheap" | "exp" | "young">("ovr");
+  const [affordable, setAffordable] = useState<boolean>(false);
   const [detail, setDetail] = useState<Player | null>(null);
   const windowOpen = transferWindowOpen(save);
+  const budget = effectiveTransferBudget(save, myId);
 
   const clubName = (id: UUID | null): string =>
     id ? (ws.teams.find((t) => t.id === id)?.name ?? "?") : "vrij";
 
-  const market = useMemo(
-    () => transferTargets(save, { position: posFilter || undefined, limit: 40 }),
+  // Ruime pool ophalen op positie; naam/leeftijd/prijs/sortering doen we client-side.
+  const pool = useMemo(
+    () => transferTargets(save, { position: posFilter || undefined, limit: 200 }),
     [save, posFilter],
   );
+  const market = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = pool
+      .filter((p) => !q || `${p.firstName} ${p.lastName}`.toLowerCase().includes(q))
+      .filter((p) => !maxAge || p.ageYears <= maxAge)
+      .filter((p) => !maxPrice || askingPrice(p) <= maxPrice)
+      .filter((p) => !affordable || askingPrice(p) <= budget);
+    const sorted = [...list];
+    if (sort === "cheap") sorted.sort((a, b) => askingPrice(a) - askingPrice(b));
+    else if (sort === "exp") sorted.sort((a, b) => askingPrice(b) - askingPrice(a));
+    else if (sort === "young") sorted.sort((a, b) => a.ageYears - b.ageYears);
+    else sorted.sort((a, b) => playerOverall(b) - playerOverall(a));
+    return sorted.slice(0, 80);
+  }, [pool, query, maxAge, maxPrice, affordable, budget, sort]);
+
   const mySquad = useMemo(
     () =>
       ws.players
@@ -1051,69 +1318,150 @@ function TransfersView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Car
 
   return (
     <div className="ch-body ch-transfers">
-      <section className="ch-panel ch-fin">
+      <section className="ch-panel ch-tr-left">
         <h2>Financiën</h2>
-        <div className="fin-grid">
-          <div><span>Saldo</span><strong>{money(myTeam.finances.balance)}</strong></div>
-          <div><span>Transferbudget</span><strong>{money(myTeam.finances.transferBudget)}</strong></div>
-          <div><span>Loon/week</span><strong>{money(weeklyWageBill(save, myId))}</strong></div>
-          <div><span>Selectie</span><strong>{squadSize(save, myId)}</strong></div>
+        <div className="tr-fin-tiles">
+          <div className="tr-fin-tile">
+            <span>Budget</span>
+            <strong style={{ color: "var(--accent-2)" }}>{money(budget)}</strong>
+          </div>
+          <div className="tr-fin-tile">
+            <span>Saldo</span>
+            <strong>{money(myTeam.finances.balance)}</strong>
+          </div>
+          <div className="tr-fin-tile">
+            <span>Loon/week</span>
+            <strong>{money(weeklyWageBill(save, myId))}</strong>
+          </div>
+          <div className="tr-fin-tile">
+            <span>Selectie</span>
+            <strong>{squadSize(save, myId)}</strong>
+          </div>
         </div>
         <div className={`fin-window${windowOpen ? " open" : ""}`}>
           Transferperiode {windowOpen ? "open" : "gesloten"}
         </div>
 
         <h3 className="ch-recent-title">Mijn selectie — verkopen</h3>
-        <ul className="tr-sell">
+        <div className="tr-head tr-row-sell">
+          <span>Pos</span>
+          <span>Speler</span>
+          <span className="tr-c">Lft</span>
+          <span className="tr-c">OVR</span>
+          <span className="tr-r">Waarde</span>
+          <span />
+        </div>
+        <div className="tr-list">
           {mySquad.map(({ p, ovr }) => (
-            <li key={p.id}>
+            <div key={p.id} className="tr-row tr-row-sell">
               <span className="tr-pos">{p.preferredPositions[0]}</span>
               <button className="tr-name tr-link" onClick={() => setDetail(p)}>
                 {p.firstName[0]}. {p.lastName}
               </button>
+              <span className="tr-age">{p.ageYears}</span>
               <span className="tr-ovr">{ovr}</span>
               <span className="tr-val">{money(p.market.estimatedValue)}</span>
               <button
-                className="btn tr-btn"
+                className="tr-btn"
                 disabled={!windowOpen || squadSize(save, myId) <= 14}
                 onClick={() => sell(p.id)}
               >
                 Verkoop
               </button>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       </section>
 
-      <section className="ch-panel ch-market">
-        <div className="market-head">
+      <section className="ch-panel ch-tr-right">
+        <div className="tr-market-head">
           <h2>Transfermarkt</h2>
-          <select className="cs-input tr-filter" value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
+          <span className="tr-count">{market.length} spelers</span>
+        </div>
+        <div className="tr-filters">
+          <div className="tr-search">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Zoek speler op naam…"
+            />
+            {query && (
+              <button className="tr-search-clear" onClick={() => setQuery("")} title="Wissen">
+                ✕
+              </button>
+            )}
+          </div>
+          <button
+            className={`tr-toggle${affordable ? " on" : ""}`}
+            onClick={() => setAffordable((v) => !v)}
+            title="Toon alleen spelers binnen je budget"
+          >
+            Betaalbaar
+          </button>
+        </div>
+        <div className="tr-filters">
+          <select className="tr-pos-select" value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
             <option value="">Alle posities</option>
             {POSITIONS.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
+          <select className="tr-pos-select" value={maxAge} onChange={(e) => setMaxAge(Number(e.target.value))}>
+            {AGE_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>{o.label}</option>
+            ))}
+          </select>
+          <select className="tr-pos-select" value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))}>
+            {PRICE_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>{o.label}</option>
+            ))}
+          </select>
+          <select className="tr-pos-select" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+            {SORT_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>{o.label}</option>
+            ))}
+          </select>
         </div>
-        <ul className="tr-market">
+        <div className="tr-head tr-row-buy">
+          <span>Pos</span>
+          <span>Speler</span>
+          <span className="tr-c">Lft</span>
+          <span>Club</span>
+          <span className="tr-c">OVR</span>
+          {TR_STATS.map((s) => (
+            <span key={s.key} className="tr-c">{s.label}</span>
+          ))}
+          <span className="tr-r">Waarde</span>
+          <span />
+        </div>
+        <div className="tr-list tr-market-list">
           {market.map((p) => {
             const can = canBuy(save, p.id);
             return (
-              <li key={p.id}>
+              <div key={p.id} className="tr-row tr-row-buy">
                 <span className="tr-pos">{p.preferredPositions[0]}</span>
                 <button className="tr-name tr-link" onClick={() => setDetail(p)}>
                   {p.firstName[0]}. {p.lastName}
                 </button>
+                <span className="tr-age">{p.ageYears}</span>
                 <span className="tr-club">{clubName(p.teamId)}</span>
                 <span className="tr-ovr">{playerOverall(p)}</span>
+                {TR_STATS.map((s) => (
+                  <span key={s.key} className="tr-stat">{statVal(p, s.key)}</span>
+                ))}
                 <span className="tr-val">{money(askingPrice(p))}</span>
-                <button className="btn tr-btn" disabled={!can.ok} title={can.reason ?? ""} onClick={() => buy(p.id)}>
+                <button className="tr-btn" disabled={!can.ok} title={can.reason ?? ""} onClick={() => buy(p.id)}>
                   Koop
                 </button>
-              </li>
+              </div>
             );
           })}
-        </ul>
+          {market.length === 0 && <div className="ch-done">Geen spelers gevonden.</div>}
+        </div>
       </section>
 
       {detail && (

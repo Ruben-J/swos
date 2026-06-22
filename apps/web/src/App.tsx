@@ -127,6 +127,10 @@ export function App() {
       onQuickMatch={() => setScreen("quickSetup")}
       onCareer={() => setScreen("careerSetup")}
       onLoadCareer={() => setScreen("careerLoad")}
+      onContinue={(save) => {
+        setCareer(save);
+        setScreen("careerHub");
+      }}
     />
   );
 }

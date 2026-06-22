@@ -23,6 +23,20 @@ export function squadSize(save: CareerSave, teamId: UUID): number {
   return save.worldState.players.filter((p) => p.teamId === teamId).length;
 }
 
+/**
+ * Besteedbaar transferbudget. Minstens de bestuurs-toewijzing (transferBudget),
+ * maar het groeit mee met het saldo: je mag je cash inzetten, minus een reserve
+ * voor de lopende loonkosten (~8 speelweken). Zo loopt je slagkracht op naarmate
+ * de club verdient, i.p.v. vast te blijven op de begin-toewijzing.
+ */
+export function effectiveTransferBudget(save: CareerSave, teamId: UUID): number {
+  const team = save.worldState.teams.find((t) => t.id === teamId);
+  if (!team) return 0;
+  const reserve = weeklyWageBill(save, teamId) * 8;
+  const fromBalance = Math.round(team.finances.balance - reserve);
+  return Math.max(team.finances.transferBudget, fromBalance, 0);
+}
+
 export interface TransferCheck {
   ok: boolean;
   reason?: string;
@@ -38,9 +52,8 @@ export function canBuy(save: CareerSave, playerId: UUID): TransferCheck {
   if (!player) return { ok: false, reason: "Speler bestaat niet" };
   if (player.teamId === buyerId) return { ok: false, reason: "Al van jouw club" };
   if (!transferWindowOpen(save)) return { ok: false, reason: "Transferperiode gesloten" };
-  const buyer = save.worldState.teams.find((t) => t.id === buyerId)!;
   const price = askingPrice(player);
-  if (buyer.finances.transferBudget < price) return { ok: false, reason: "Te duur (budget)" };
+  if (effectiveTransferBudget(save, buyerId) < price) return { ok: false, reason: "Te duur (budget)" };
   if (squadSize(save, buyerId) >= MAX_SQUAD) return { ok: false, reason: "Selectie vol" };
   if (player.teamId && squadSize(save, player.teamId) <= MIN_SQUAD) {
     return { ok: false, reason: "Verkoper kan niet kleiner" };
