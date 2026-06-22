@@ -1632,7 +1632,47 @@ kbd {
 .ch-res-ha { color: var(--muted); }
 
 /* --- Training-tab --- */
-.ch-traintab > section { grid-column: 1 / -1; }
+.ch-traintab {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 16px;
+  overflow: hidden;
+}
+.ch-train-left,
+.ch-train-right {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ch-train-right .tr-list { margin-top: 0; }
+.ch-train-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.ch-train-note strong { color: var(--text); }
+/* Ontwikkelingsrij: Pos · Naam · Lft · OVR · Groei · Prognose */
+.trn-row {
+  grid-template-columns: 22px minmax(0, 1fr) 28px 34px 50px 56px;
+}
+.trn-delta {
+  text-align: center;
+  font: 700 12px var(--font-mono);
+}
+.trn-delta.up { color: var(--accent); }
+.trn-delta.down { color: var(--danger); }
+.trn-delta.flat { color: var(--muted); }
+.trn-trend {
+  text-align: right;
+  font-weight: 700;
+}
+.trend-up { color: var(--accent); }
+.trend-down { color: var(--danger); }
+.trend-flat { color: var(--muted); }
 .ch-train-intro {
   color: var(--muted);
   line-height: 1.5;

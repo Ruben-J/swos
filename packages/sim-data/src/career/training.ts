@@ -6,7 +6,7 @@ import {
   type TrainingFocus,
   type UUID,
 } from "@pitch/shared";
-import { playerOverall } from "../world/squad.js";
+import { playerOverall, playerOverallExact } from "../world/squad.js";
 
 /** Attribuutsleutels die door training kunnen veranderen. */
 type AttrKey = keyof Player["attributes"];
@@ -132,11 +132,25 @@ export function processTraining(
   focus: TrainingFocus,
 ): void {
   const fitnessFocus = focus === "fitness";
+
+  // Houd cumulatieve groei van de eigen selectie bij; reset bij een nieuw seizoen.
+  const m = save.manager;
+  if (m.seasonDevSeasonId !== save.worldState.activeSeasonId) {
+    m.seasonDev = {};
+    m.seasonDevSeasonId = save.worldState.activeSeasonId;
+  }
+  const dev = (m.seasonDev ??= {});
+
   for (const p of save.worldState.players) {
     if (!p.teamId) continue;
-    const teamFocus = p.teamId === myTeamId ? focus : null;
+    const mine = p.teamId === myTeamId;
+    const teamFocus = mine ? focus : null;
+    const before = mine ? playerOverallExact(p) : 0;
     trainPlayer(rng, p, teamFocus);
-    if (p.teamId === myTeamId) recover(rng, p, fitnessFocus);
+    if (mine) {
+      dev[p.id] = (dev[p.id] ?? 0) + (playerOverallExact(p) - before);
+      recover(rng, p, fitnessFocus);
+    }
     // Marktwaarde grof bijtrekken op de actuele overall (jong talent stijgt).
     const ov = playerOverall(p);
     const target = clamp((ov - 40) / 50, 0, 1) ** 1.8 * 70_000_000 + 50_000;
@@ -144,4 +158,40 @@ export function processTraining(
       p.market.estimatedValue * 0.9 + target * 0.1,
     );
   }
+}
+
+/** Ontwikkelingsrichting van een speler (prognose op leeftijd vs piek/potentieel). */
+export type DevTrend = "up" | "down" | "flat";
+export function developmentTrend(p: Player): DevTrend {
+  const peak = peakAge(p);
+  if (p.ageYears > peak + 1) return "down";
+  const room = p.hidden.potential - playerOverall(p);
+  if (p.ageYears <= peak && room > 2) return "up";
+  return "flat";
+}
+
+export interface TrainingResult {
+  player: Player;
+  ovr: number;
+  /** Afgeronde overall-groei dit seizoen (kan negatief zijn bij verval). */
+  delta: number;
+  trend: DevTrend;
+}
+
+/** Trainingsresultaten van de eigen selectie: groei dit seizoen + prognose. */
+export function trainingResults(save: CareerSave): TrainingResult[] {
+  const myId = save.manager.currentTeamId;
+  const dev =
+    save.manager.seasonDevSeasonId === save.worldState.activeSeasonId
+      ? save.manager.seasonDev ?? {}
+      : {};
+  return save.worldState.players
+    .filter((p) => p.teamId === myId)
+    .map((p) => ({
+      player: p,
+      ovr: playerOverall(p),
+      delta: Math.round(dev[p.id] ?? 0),
+      trend: developmentTrend(p),
+    }))
+    .sort((a, b) => b.delta - a.delta || b.ovr - a.ovr);
 }

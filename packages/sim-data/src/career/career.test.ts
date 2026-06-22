@@ -5,6 +5,8 @@ import { computeStandings } from "./standings.js";
 import { buildWorld } from "../world/build.js";
 import { createCareer } from "../world/build.js";
 import {
+  buildRatings,
+  buildTeamStrengths,
   divisionStandings,
   playMatchday,
   seasonComplete,
@@ -21,7 +23,7 @@ import { processAiTransfers } from "./aitransfers.js";
 import { myYouthProspects, potentialStars } from "./youth.js";
 import { acceptJobOffer, generateJobOffers, updateManagerReputation } from "./jobs.js";
 import { pickAwayKitSide } from "../world/kits.js";
-import { playerOverall, toTeamSetup } from "../world/squad.js";
+import { pickBestEleven, playerOverall, toTeamSetup } from "../world/squad.js";
 
 describe("fixtures", () => {
   it("dubbel round-robin: iedereen 2x tegen elkaar, geen zelf-duel", () => {
@@ -216,6 +218,48 @@ describe("career-seizoen", () => {
     expect(save.worldState.players.find((p) => p.id === target.id)!.teamId).toBeNull();
     expect(squadSize(save, myTeam.id)).toBe(sizeBefore);
     expect(buyer.finances.transferBudget).toBeGreaterThan(budgetAfterBuy);
+  });
+
+  it("simulatie: gekozen opstelling weegt mee in de rating van de eigen club", () => {
+    const world = buildWorld(new Rng(5), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 2, managerName: "T", teamId: myTeam.id });
+
+    // Zonder gekozen tactiek: effectief de beste elf.
+    const baseline = buildRatings(save).get(myTeam.id)!;
+
+    // Forceer een opzettelijk zwakke basiself (de 11 laagste spelers).
+    const squad = save.worldState.players.filter((p) => p.teamId === myTeam.id);
+    const worst = [...squad]
+      .sort((a, b) => playerOverall(a) - playerOverall(b))
+      .slice(0, 11)
+      .map((p) => p.id);
+    save.manager.tactics = {
+      formation: "4-4-2",
+      lineup: worst,
+      shape: { lineHeight: 0.5, press: 0.5, width: 0.5, tempo: 0.5 },
+    };
+    const weak = buildRatings(save).get(myTeam.id)!;
+
+    expect(weak).toBeLessThan(baseline);
+  });
+
+  it("simulatie: formatie is een aanval/verdediging-trade-off", () => {
+    const world = buildWorld(new Rng(7), 2025);
+    const myTeam = world.teams[0]!;
+    const save = createCareer(world, { seed: 3, managerName: "T", teamId: myTeam.id });
+    const squad = save.worldState.players.filter((p) => p.teamId === myTeam.id);
+    const eleven = (f: string) => pickBestEleven(squad, f).map((c) => c.player.id);
+    const shape = { lineHeight: 0.5, press: 0.5, width: 0.5, tempo: 0.5 };
+
+    save.manager.tactics = { formation: "4-4-2", lineup: eleven("4-4-2"), shape };
+    const s442 = buildTeamStrengths(save).get(myTeam.id)!;
+    save.manager.tactics = { formation: "4-5-1", lineup: eleven("4-5-1"), shape };
+    const s451 = buildTeamStrengths(save).get(myTeam.id)!;
+
+    // 4-4-2 (twee spitsen) valt harder aan; 4-5-1 staat solider.
+    expect(s442.att).toBeGreaterThan(s451.att);
+    expect(s451.def).toBeGreaterThan(s442.def);
   });
 
   it("blessures/schorsingen: ontstaan en herstellen over een seizoen", () => {

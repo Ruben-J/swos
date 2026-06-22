@@ -290,6 +290,10 @@ export interface CareerSave {
     pendingOffers?: JobOffer[];
     /** Door de manager gekozen opstelling + tactiek van de eigen club. */
     tactics?: ManagerTactics;
+    /** Cumulatieve (ongeronde) overall-ontwikkeling per speler dit seizoen. */
+    seasonDev?: Record<UUID, number>;
+    /** Seizoen waar seasonDev bij hoort (om bij overgang te resetten). */
+    seasonDevSeasonId?: UUID;
   };
   worldState: {
     activeSeasonId: UUID;

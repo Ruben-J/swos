@@ -15,6 +15,16 @@ export interface QuickResult {
   shotsAway: number;
 }
 
+/**
+ * Speelstijl-tilt: vermenigvuldigers op de verwachte goals. `own` schaalt de
+ * eigen aanval (homeAtt-multiplier), `opp` de blootstelling achterin (tegenstander
+ * scoort makkelijker). Aanvallend = beide hoog (open), afwachtend = beide laag.
+ */
+export interface QuickTilt {
+  own: number;
+  opp: number;
+}
+
 /** Poisson-trekking (Knuth) met de gegeven RNG. */
 function poisson(rng: Rng, lambda: number): number {
   const L = Math.exp(-Math.max(0, lambda));
@@ -33,22 +43,28 @@ function poisson(rng: Rng, lambda: number): number {
  */
 export function quickSimulate(
   rng: Rng,
-  homeRating: number,
-  awayRating: number,
+  homeAtt: number,
+  homeDef: number,
+  awayAtt: number,
+  awayDef: number,
   homeAdvantage = 6,
+  tilt?: { homeAtt?: number; awayAtt?: number },
 ): QuickResult {
-  const diff = clamp(homeRating + homeAdvantage - awayRating, -40, 40);
-  // Basis ~1.35 goals per ploeg; ratingverschil schuift de verwachting.
-  const base = 1.35;
-  const lambdaHome = clamp(base * Math.exp(diff / 28), 0.2, 5.5);
-  const lambdaAway = clamp(base * Math.exp(-diff / 28), 0.2, 5.5);
+  // Verwachte goals uit aanval-vs-verdediging: eigen aanval tegen de
+  // verdediging van de tegenstander, plus thuisvoordeel.
+  const homeEdge = clamp(homeAtt - awayDef + homeAdvantage, -40, 40);
+  const awayEdge = clamp(awayAtt - homeDef, -40, 40);
+  const base = 1.25;
+  const lambdaHome = clamp(base * Math.exp(homeEdge / 28) * (tilt?.homeAtt ?? 1), 0.2, 6);
+  const lambdaAway = clamp(base * Math.exp(awayEdge / 28) * (tilt?.awayAtt ?? 1), 0.2, 6);
   const homeGoals = poisson(rng, lambdaHome);
   const awayGoals = poisson(rng, lambdaAway);
 
-  // Balbezit/schoten als sfeercijfers, geschaald met rating en uitslag.
-  const possessionHomeApprox = Math.round(clamp(50 + diff * 0.8, 28, 72));
-  const shotsHome = Math.max(homeGoals, Math.round(8 + diff * 0.15 + rng.range(0, 6)));
-  const shotsAway = Math.max(awayGoals, Math.round(8 - diff * 0.15 + rng.range(0, 6)));
+  // Balbezit/schoten als sfeercijfers, geschaald met de krachtsverhouding.
+  const ctrl = homeAtt + homeDef - awayAtt - awayDef + homeAdvantage;
+  const possessionHomeApprox = Math.round(clamp(50 + ctrl * 0.4, 28, 72));
+  const shotsHome = Math.max(homeGoals, Math.round(8 + ctrl * 0.12 + rng.range(0, 6)));
+  const shotsAway = Math.max(awayGoals, Math.round(8 - ctrl * 0.12 + rng.range(0, 6)));
 
   return { homeGoals, awayGoals, possessionHomeApprox, shotsHome, shotsAway };
 }

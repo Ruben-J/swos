@@ -49,20 +49,25 @@ function makeAttributes(rng: Rng, position: Position, quality: number): Player["
   };
 }
 
-/** Positie-gewogen overall 0..100. */
-export function playerOverall(p: Player): number {
+/** Positie-gewogen overall 0..100, ongerond (voor het meten van kleine groei). */
+export function playerOverallExact(p: Player): number {
   const a = p.attributes;
   const pos = p.preferredPositions[0] ?? "CM";
-  if (pos === "GK") return Math.round((a.goalkeeping ?? 40) * 0.85 + a.composure * 0.15);
+  if (pos === "GK") return (a.goalkeeping ?? 40) * 0.85 + a.composure * 0.15;
   const def = pos === "RB" || pos === "LB" || pos === "CB";
   const att = pos === "ST" || pos === "RW" || pos === "LW";
   if (def) {
-    return Math.round(a.tackling * 0.34 + a.heading * 0.18 + a.pace * 0.16 + a.passing * 0.14 + a.composure * 0.18);
+    return a.tackling * 0.34 + a.heading * 0.18 + a.pace * 0.16 + a.passing * 0.14 + a.composure * 0.18;
   }
   if (att) {
-    return Math.round(a.finishing * 0.3 + a.shooting * 0.22 + a.pace * 0.2 + a.ballControl * 0.16 + a.composure * 0.12);
+    return a.finishing * 0.3 + a.shooting * 0.22 + a.pace * 0.2 + a.ballControl * 0.16 + a.composure * 0.12;
   }
-  return Math.round(a.passing * 0.3 + a.ballControl * 0.22 + a.tackling * 0.16 + a.stamina * 0.14 + a.composure * 0.18);
+  return a.passing * 0.3 + a.ballControl * 0.22 + a.tackling * 0.16 + a.stamina * 0.14 + a.composure * 0.18;
+}
+
+/** Positie-gewogen overall 0..100. */
+export function playerOverall(p: Player): number {
+  return Math.round(playerOverallExact(p));
 }
 
 export interface GenPlayerOpts {
@@ -218,7 +223,7 @@ function toMatchStats(p: Player): MatchPlayerStats {
 }
 
 /** Hoe goed past een speler op een formatieslot (0 = exact, hoger = slechter). */
-function positionFit(p: Player, slot: Position): number {
+export function positionFit(p: Player, slot: Position): number {
   const pref = p.preferredPositions[0] ?? "CM";
   if (pref === slot) return 0;
   const group = (pos: Position): string =>

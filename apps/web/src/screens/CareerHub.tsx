@@ -25,6 +25,7 @@ import {
   statusLabel,
   teamFormationName,
   teamNextMatch,
+  trainingResults,
   transferTargets,
   transferWindowOpen,
   weeklyWageBill,
@@ -387,7 +388,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
 
       {tab === "tactiek" && <TacticsView save={save} onUpdate={onUpdate} />}
 
-      {tab === "training" && <TrainingView focus={focus} setFocus={setFocus} />}
+      {tab === "training" && <TrainingView save={save} focus={focus} setFocus={setFocus} />}
 
       {tab === "jeugd" && <YouthView save={save} />}
 
@@ -892,25 +893,32 @@ function TacticsView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: Caree
 }
 
 /** Trainingstab: kies de wekelijkse focus + uitleg wat training doet. */
+const TREND_ICON: Record<string, string> = { up: "▲", down: "▼", flat: "—" };
+
 function TrainingView({
+  save,
   focus,
   setFocus,
 }: {
+  save: CareerSave;
   focus: TrainingFocus;
   setFocus: (f: TrainingFocus) => void;
 }) {
   const active = TRAINING_OPTS.find((o) => o.id === focus)!;
+  const results = useMemo(() => trainingResults(save), [save]);
+  const risers = results.filter((r) => r.delta > 0).length;
+  const fallers = results.filter((r) => r.delta < 0).length;
+  const tracked = results.some((r) => r.delta !== 0);
+
   return (
     <div className="ch-body ch-traintab">
-      <section className="ch-panel">
+      <section className="ch-panel ch-train-left">
         <h2>Training</h2>
         <p className="ch-train-intro">
-          Elke speelweek traint je selectie. Spelers groeien richting hun verborgen{" "}
-          <strong>potentieel</strong>: jonge spelers stijgen het snelst, rond hun piek (±27 jaar,
-          keepers later) vlakt het af en daarna lopen ze langzaam terug — fysiek het eerst.
-          Professionaliteit bepaalt hoe hard iemand groeit. De gekozen focus stuurt{" "}
-          <strong>welke</strong> eigenschappen sneller stijgen; conditie, scherpte en vorm herstellen
-          na elke wedstrijd.
+          Elke speelweek groeit je selectie richting het verborgen <strong>potentieel</strong>:
+          jonge spelers stijgen het snelst, rond de piek (±27 jaar, keepers later) vlakt het af en
+          daarna lopen ze terug — fysiek het eerst. De focus stuurt <strong>welke</strong>
+          eigenschappen sneller stijgen.
         </p>
         <div className="ch-train-cards">
           {TRAINING_OPTS.map((o) => (
@@ -927,6 +935,50 @@ function TrainingView({
         <div className="ch-train-current">
           Huidige focus: <strong>{active.label}</strong> — {active.hint}
         </div>
+      </section>
+
+      <section className="ch-panel ch-train-right">
+        <div className="comp-head">
+          <h2>Ontwikkeling dit seizoen</h2>
+          <span className="tr-count">
+            <span style={{ color: "var(--accent)" }}>{risers}▲</span> ·{" "}
+            <span style={{ color: "var(--danger)" }}>{fallers}▼</span>
+          </span>
+        </div>
+        <div className="tr-head trn-row">
+          <span>Pos</span>
+          <span>Speler</span>
+          <span className="tr-c">Lft</span>
+          <span className="tr-c">OVR</span>
+          <span className="tr-c">Groei</span>
+          <span className="tr-r">Prognose</span>
+        </div>
+        <div className="tr-list">
+          {results.map((r) => {
+            const sign = r.delta > 0 ? "up" : r.delta < 0 ? "down" : "flat";
+            const deltaText = r.delta > 0 ? `+${r.delta}` : r.delta < 0 ? `${r.delta}` : "0";
+            return (
+              <div key={r.player.id} className="tr-row trn-row">
+                <span className="tr-pos">{r.player.preferredPositions[0]}</span>
+                <span className="tr-name">
+                  {r.player.firstName[0]}. {r.player.lastName}
+                </span>
+                <span className="tr-age">{r.player.ageYears}</span>
+                <span className="tr-ovr">{r.ovr}</span>
+                <span className={`trn-delta ${sign}`}>{deltaText}</span>
+                <span className={`trn-trend trend-${r.trend}`} title="Prognose op basis van leeftijd & potentieel">
+                  {TREND_ICON[r.trend]}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        {!tracked && (
+          <div className="ch-train-note">
+            Groei wordt geteld vanaf nu — speel of simuleer speeldagen en je ziet hier per speler de
+            verandering. De <strong>prognose</strong> toont nu al wie stijgt of (door leeftijd) daalt.
+          </div>
+        )}
       </section>
     </div>
   );
