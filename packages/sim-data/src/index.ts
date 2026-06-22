@@ -18,3 +18,4 @@ export * from "./career/training.js";
 export * from "./career/aitransfers.js";
 export * from "./career/youth.js";
 export * from "./career/jobs.js";
+export * from "./career/finances.js";

@@ -20,7 +20,10 @@ export interface PlayerCommand {
   move: Vec2;
   sprint: boolean;
   kick: KickRequest | null;
+  /** Staande tackle: veilig poken naar de bal, maakt vrijwel nooit overtreding. */
   tackle: boolean;
+  /** Sliding tackle: inglijden met impuls; wint de bal of maakt een overtreding. */
+  slide: boolean;
 }
 
 export const noCommand = (): PlayerCommand => ({
@@ -28,6 +31,7 @@ export const noCommand = (): PlayerCommand => ({
   sprint: false,
   kick: null,
   tackle: false,
+  slide: false,
 });
 
 // --- Geometrie-helpers ---------------------------------------------------
@@ -460,14 +464,29 @@ export function computeAiCommand(
   const myGoal = attackingGoal(player.side);
   const opponents = players.filter((p) => p.side !== player.side);
 
-  if (player.isKeeper) return keeperCommand(player, ball, ownGoal, myGoal);
+  if (player.isKeeper) return keeperCommand(players, player, ball, ownGoal, myGoal);
 
   const teamHasBall = controlling === player.side;
   const target = plan.targets.get(player.id) ?? player.anchor;
 
-  // Bal wordt vastgehouden (keeper): niet pressen, gewoon je positie houden.
-  if (ballHeld && !teamHasBall) {
-    moveTo(cmd, player, target, false);
+  // Keeper heeft de bal vast. Eigen ploeg BIEDT ZICH AAN voor de opbouw; de
+  // tegenpartij zakt terug (compact blok richting eigen helft, niet pressen).
+  if (ballHeld) {
+    if (teamHasBall) {
+      // Bied een passlijn aan: ga vanuit je formatiepositie wég van je dichtste
+      // dekker, zodat de keeper je vrij kan inspelen.
+      let aim = target;
+      const marker = nearestOpponentNear(opponents, player.pos, 7);
+      if (marker) {
+        const away = normalize({ x: player.pos.x - marker.pos.x, y: player.pos.y - marker.pos.y });
+        aim = { x: target.x + away.x * 6, y: target.y + away.y * 6 };
+      }
+      moveTo(cmd, player, aim, false);
+      return cmd;
+    }
+    // Tegenpartij: terugzakken naar een compact blok op de eigen helft.
+    const drop = { x: target.x + (ownGoal.x - target.x) * 0.38, y: target.y };
+    moveTo(cmd, player, drop, false);
     return cmd;
   }
 
@@ -590,19 +609,26 @@ export function computeAiCommand(
           x = ownGoal.x === 0 ? Math.max(x, plan.lineX) : Math.min(x, plan.lineX);
         }
         const mark: Vec2 = { x, y: man.pos.y + toGoal.y * gap };
-        moveTo(cmd, player, mark, dist(player.pos, mark) > (nearOwnGoal ? 3 : 6));
+        // Energie sparen: alleen sprinten om bij te trekken als het er echt toe
+        // doet (dicht bij eigen doel, of de bal/het duel is dichtbij). Ligt het
+        // spel ver weg, dan jog je naar je dekkingspositie i.p.v. te sprinten.
+        const urgent = nearOwnGoal || ballToMan < 18 || dist(player.pos, ball.pos) < 18;
+        moveTo(cmd, player, mark, urgent && dist(player.pos, mark) > (nearOwnGoal ? 3 : 6));
       }
       return cmd;
     }
   }
 
   if (player.id === plan.coverId) {
-    // Cover: positie tussen bal en eigen doel (cover shadow).
+    // Cover: positie tussen bal en eigen doel (cover shadow). Energie sparen:
+    // alleen sprinten als er echt dreiging is (bal dicht bij eigen doel of bij
+    // deze speler); ver weg gewoon joggend de cover-positie innemen.
     const cover: Vec2 = {
       x: ball.pos.x + (ownGoal.x - ball.pos.x) * 0.35,
       y: ball.pos.y + (ownGoal.y - ball.pos.y) * 0.35,
     };
-    moveTo(cmd, player, cover, true);
+    const danger = dist(ball.pos, ownGoal) < 30 || dist(player.pos, ball.pos) < 18;
+    moveTo(cmd, player, cover, danger);
     return cmd;
   }
 
@@ -634,6 +660,28 @@ function onBallCommand(
   const cmd = noCommand();
   const distToGoal = dist(player.pos, myGoal);
   const pressure = nearestOpponentNear(opponents, player.pos, 3.5);
+
+  // Uitkomende keeper / 1v1: NIET verder dribbelen tot hij smoort, maar METEEN
+  // afronden — in de hoek wég van de keeper, of er met een stiftje overheen als
+  // hij dichtbij is. Dit voorkomt dat de aanvaller de bal in de handen loopt.
+  const gk = opponents.find((o) => o.isKeeper);
+  if (gk) {
+    const gkToGoal = dist(gk.pos, myGoal);
+    const gkNear = dist(gk.pos, player.pos) < 7;
+    const gkOut = gkToGoal > 6; // keeper duidelijk van zijn lijn
+    if (((gkOut && distToGoal < 20) || gkNear) && distToGoal < 24) {
+      const aim = shotTarget(opponents, myGoal);
+      const sh = player.stats.shooting / 100;
+      const chip = gkNear; // keeper vlakbij -> eroverheen lobben
+      cmd.kick = {
+        dir: dirTo(player, aim),
+        power: chip ? 17 + sh * 8 : 30 + sh * 12,
+        loft: chip ? 6.5 : 1.5,
+        curve: 0,
+      };
+      return cmd;
+    }
+  }
 
   // Schieten binnen bereik: mik op de hoek wég van de keeper (niet recht op 'm).
   const aimGoal = shotTarget(opponents, myGoal);
@@ -669,18 +717,36 @@ function onBallCommand(
     return cmd;
   }
 
-  // Dribbel richting doel; wijk licht uit bij directe druk.
-  let dir = goalDir;
-  if (pressure) {
-    const away = normalize({ x: player.pos.x - pressure.pos.x, y: player.pos.y - pressure.pos.y });
-    dir = normalize({ x: dir.x + away.x * 0.6, y: dir.y + away.y * 0.6 });
+  // Dribbel naar de meest OPEN richting — niet per se vooruit. Bias naar het doel,
+  // maar onder druk/afgesloten lijn mag de speler opzij of zelfs even terugdraaien
+  // om de verdediger te ontwijken. Evalueer een waaier rond de doelrichting en kies
+  // de richting met de meeste ruimte (en wat doel-voorkeur).
+  const goalAng = Math.atan2(goalDir.y, goalDir.x);
+  let bestDir = goalDir;
+  let bestScore = -Infinity;
+  for (let k = -4; k <= 4; k++) {
+    const a = goalAng + (k * Math.PI) / 6; // -120°..+120° in stappen van 30°
+    const d = { x: Math.cos(a), y: Math.sin(a) };
+    const probe = { x: player.pos.x + d.x * 6, y: player.pos.y + d.y * 6 };
+    let nearOpp = Infinity;
+    for (const o of opponents) nearOpp = Math.min(nearOpp, dist(o.pos, probe));
+    let score = Math.min(nearOpp, 8) + Math.cos(a - goalAng) * 3; // ruimte + doel-bias
+    if (probe.x < 2 || probe.x > PITCH.width - 2 || probe.y < 2 || probe.y > PITCH.height - 2) {
+      score -= 6; // niet het veld uit dribbelen
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestDir = d;
+    }
   }
-  cmd.move = dir;
-  cmd.sprint = !pressure;
+  cmd.move = bestDir;
+  // Alleen sprinten als hij ongeveer vooruit gaat en niet onder directe druk staat.
+  cmd.sprint = !pressure && bestDir.x * goalDir.x + bestDir.y * goalDir.y > 0.5;
   return cmd;
 }
 
 function keeperCommand(
+  players: PlayerEntity[],
   gk: PlayerEntity,
   ball: BallState,
   ownGoal: Vec2,
@@ -688,14 +754,33 @@ function keeperCommand(
 ): PlayerCommand {
   const cmd = noCommand();
 
-  // Bal in handen -> uittrappen richting de andere helft (clearance).
+  // Bal in handen -> RUSTIG uitspelen: zoek een vrije teamgenoot (geen tegenstander
+  // dichtbij) en rol/pass 'm laag in, zodat de tegenpartij 'm niet meteen afpakt.
+  // Is er niemand vrij, dan een klare hoge bal naar voren.
   if (ball.ownerId === gk.id) {
-    cmd.kick = {
-      dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }),
-      power: 30,
-      loft: 6,
-      curve: 0,
-    };
+    let best: PlayerEntity | null = null;
+    let bestScore = -Infinity;
+    for (const mate of players) {
+      if (mate.id === gk.id || mate.side !== gk.side) continue;
+      let nearOpp = Infinity;
+      for (const o of players) {
+        if (o.side !== gk.side) nearOpp = Math.min(nearOpp, dist(o.pos, mate.pos));
+      }
+      if (nearOpp < 6) continue; // gedekt -> niet inspelen
+      const d = dist(gk.pos, mate.pos);
+      if (d > 45) continue; // te ver voor een gerichte, lage uitworp/pass
+      const score = Math.min(nearOpp, 14) - Math.abs(d - 18) * 0.2; // ruim + op afstand
+      if (score > bestScore) {
+        bestScore = score;
+        best = mate;
+      }
+    }
+    if (best) {
+      const d = dist(gk.pos, best.pos);
+      cmd.kick = { dir: dirTo(gk, best.pos), power: clamp(10 + d * 0.45, 12, 28), loft: 0, curve: 0, targetId: best.id };
+    } else {
+      cmd.kick = { dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }), power: 32, loft: 7, curve: 0 };
+    }
     return cmd;
   }
 
@@ -744,9 +829,18 @@ function keeperCommand(
     return cmd;
   }
 
-  // 1v1 / doorgebroken bal: uitkomen om te smoren (alleen bij trage bal dichtbij).
-  if (dist(gk.pos, ball.pos) < 4.5 && speed < 11 && ball.z < 1.6) {
+  // ECHT 1v1 / doorgebroken aanvaller: UITKOMEN om te smoren. Strikte trigger,
+  // zodat de keeper NIET uitkomt bij een bal aan de zijkant van de box of als er
+  // nog een verdediger tussen zit (zie isKeeperOneOnOne). De fysieke duik/smother
+  // volgt in match.ts zodra hij dichtbij is.
+  if (isKeeperOneOnOne(players, gk, ball, ownGoal, speed)) {
     moveTo(cmd, gk, ball.pos, true);
+    if (dist(gk.pos, ball.pos) < 1.5) cmd.tackle = true;
+    return cmd;
+  }
+  // Trage losse bal pal voor de keeper: gewoon oprapen (korte stap, geen uitloop).
+  if (dist(gk.pos, ball.pos) < 3 && speed < 10 && ball.z < 1.6) {
+    moveTo(cmd, gk, ball.pos, false);
     if (dist(gk.pos, ball.pos) < 1.5) cmd.tackle = true;
     return cmd;
   }
@@ -769,6 +863,46 @@ function keeperCommand(
   };
   moveTo(cmd, gk, target, len({ x: target.x - gk.pos.x, y: target.y - gk.pos.y }) > 2.5);
   return cmd;
+}
+
+/**
+ * Strikte 1v1-detectie voor de keeper: mag hij uitkomen/duiken op de bal? Alleen
+ * als (a) de bal laag en niet te hard is, (b) binnen de box-diepte én CENTRAAL
+ * voor het doel ligt (geen zijkant), (c) een tegenstander echt aan de bal is, en
+ * (d) die aanvaller door de laatste lijn is (geen eigen verdediger doel-zijde van
+ * hem). Gedeeld door de AI-beweging (keeperCommand) en de fysieke smother (match).
+ */
+export function isKeeperOneOnOne(
+  players: PlayerEntity[],
+  gk: PlayerEntity,
+  ball: BallState,
+  ownGoal: Vec2,
+  ballSpeed: number,
+): boolean {
+  if (ball.z > 1.6 || ballSpeed > 12) return false;
+  const cy = PITCH.height / 2;
+  if (Math.abs(ball.pos.x - ownGoal.x) > PITCH.penaltyBoxDepth) return false; // binnen de box
+  if (Math.abs(ball.pos.y - cy) > PITCH.goalWidth / 2 + 6) return false; // centraal, geen zijkant
+  // Tegenstander echt aan de bal?
+  let carrier: PlayerEntity | null = null;
+  let nOpp = Infinity;
+  for (const o of players) {
+    if (o.isKeeper || o.side === gk.side) continue;
+    const d = dist(o.pos, ball.pos);
+    if (d < nOpp) {
+      nOpp = d;
+      carrier = o;
+    }
+  }
+  if (!carrier || nOpp > 2.5) return false;
+  // Door de laatste lijn? Geen eigen verdediger dichter bij het doel dan de aanvaller.
+  const goalPt: Vec2 = { x: ownGoal.x, y: cy };
+  const carrierToGoal = dist(carrier.pos, goalPt);
+  for (const o of players) {
+    if (o.isKeeper || o.side !== gk.side) continue;
+    if (dist(o.pos, goalPt) < carrierToGoal - 1) return false; // verdediger staat ertussen
+  }
+  return true;
 }
 
 // --- kleine helpers ------------------------------------------------------

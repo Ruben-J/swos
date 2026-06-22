@@ -71,6 +71,10 @@ export interface Team {
     transferBudget: number;
     sponsorTier: number;
     debt: number;
+    /** Lopende seizoenstotalen (alleen bijgehouden voor de club van de speler). */
+    season?: { gate: number; sponsor: number; wages: number; prize: number };
+    /** Boekhouding van de laatste afgewerkte speeldag (voor het overzicht). */
+    lastMatchday?: { date: string; gate: number; sponsor: number; wages: number; net: number };
   };
   reputation: {
     domestic: number;

@@ -373,6 +373,14 @@ kbd {
   border-color: var(--accent);
   background: #16241c;
 }
+.cs-item.home {
+  border-color: #3ad17a;
+  background: #11271a;
+}
+.cs-item.away {
+  border-color: #4aa3ff;
+  background: #122031;
+}
 .cs-tier {
   color: var(--muted);
   font-size: 0.75rem;
@@ -677,6 +685,18 @@ kbd {
 .fin-window.open {
   background: #16241c;
   color: var(--accent);
+}
+.fin-ledger {
+  margin-top: 0.8rem;
+}
+.fin-last {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.fin-last strong {
+  color: var(--accent-2);
 }
 .market-head {
   display: flex;

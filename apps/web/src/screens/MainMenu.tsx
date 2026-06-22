@@ -1,11 +1,10 @@
 interface Props {
   onQuickMatch: () => void;
-  onLocalVersus: () => void;
   onCareer: () => void;
   onLoadCareer: () => void;
 }
 
-export function MainMenu({ onQuickMatch, onLocalVersus, onCareer, onLoadCareer }: Props) {
+export function MainMenu({ onQuickMatch, onCareer, onLoadCareer }: Props) {
   return (
     <div className="menu">
       <div>
@@ -15,9 +14,6 @@ export function MainMenu({ onQuickMatch, onLocalVersus, onCareer, onLoadCareer }
       <div className="menu-buttons">
         <button className="btn primary" onClick={onQuickMatch}>
           Snelle wedstrijd
-        </button>
-        <button className="btn" onClick={onLocalVersus}>
-          Lokaal 1v1
         </button>
         <button className="btn" onClick={onCareer}>
           Carrièremodus

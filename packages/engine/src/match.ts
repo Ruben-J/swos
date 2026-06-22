@@ -18,6 +18,7 @@ import {
   clampOffside,
   computeAiCommand,
   computeTeamPlan,
+  isKeeperOneOnOne,
   nearestPlayer,
   nearestTeammateInCone,
   noCommand,
@@ -44,6 +45,7 @@ import {
 const CROSSBAR_HEIGHT = 2.44;
 const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de hervatting
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
+const KEEPER_DIVE_VZ = 6; // verticale impuls (units/s) waarmee een keeperduik de lucht in springt
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
 const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
 const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
@@ -70,11 +72,16 @@ export interface MatchSnapshotPlayer {
   skinColor: string;
   x: number;
   y: number;
+  /** Hoogte boven de grond (units), >0 tijdens een keeperduik (sprong). */
+  z: number;
   facing: number;
   state: string;
   isKeeper: boolean;
   isActive: boolean;
   hasBall: boolean;
+  /** Hoe de speler de bal vasthoudt: ingooi (boven het hoofd), keeper (in de
+   *  handen), of niet (null = aan de voet / geen bal). Puur voor de animatie. */
+  hold: "throw" | "keeper" | null;
 }
 
 export interface MatchSnapshot {
@@ -289,9 +296,17 @@ export class MatchSim {
    */
   private takeRestart(dir: Vec2, power: number, loft: number, targetId: string | null = null): void {
     const taker = this.byId(this.restartTakerId);
+    const isThrowIn = this.restartKind === "throwin";
     this.phase = "play";
     if (taker) {
       this.ball.pos = { x: taker.pos.x, y: taker.pos.y };
+      // Inworp: de bal verlaat de handen BOVEN het hoofd en maakt een boog. Zet
+      // dus de begin-hoogte op kophoogte en garandeer wat loft (anders ploft hij
+      // meteen op de grond i.p.v. door de lucht te vliegen).
+      if (isThrowIn) {
+        this.ball.z = 2.0;
+        loft = Math.max(loft, 3.5);
+      }
       kickBall(this.ball, { dir, power, loft, curve: 0, byId: taker.id, bySide: taker.side, targetId });
       taker.state = "kick";
     }
@@ -395,20 +410,23 @@ export class MatchSim {
       // AI-keeper: fysieke duik naar een inkomend schot (impuls); de dive-state
       // onderdrukt daarna zijn normale beweging in applyCommand, zodat de impuls
       // hem ballistisch naar het kruispunt draagt.
-      if (!isHumanActive && p.isKeeper) this.tryKeeperDive(p);
+      if (!isHumanActive && p.isKeeper) {
+        this.tryKeeperDive(p);
+        this.tryKeeperSmother(p);
+      }
 
       // AI maakt af en toe een overtreding: een verdediger die dicht op de
       // baldragende tegenstander zit (lichaam binnen bereik) terwijl de bal net
       // buiten schoon bereik is, kan een mistimede sliding inzetten -> de man
       // i.p.v. de bal raken. Kans is klein en hoger bij een zwakke tackler.
-      if (!isHumanActive && !p.isKeeper && p.tackleCooldown <= 0 && !cmd.tackle) {
+      if (!isHumanActive && !p.isKeeper && p.tackleCooldown <= 0 && !cmd.tackle && !cmd.slide) {
         const owner = this.byId(this.ball.ownerId);
         if (owner && owner.side !== p.side) {
           const dMan = dist(p.pos, owner.pos);
           const dBall = dist(p.pos, this.ball.pos);
           if (dMan < PLAYER.tackleRange + 0.3 && dBall > PLAYER.tackleRange) {
             const foulProb = 0.006 * (1.5 - p.stats.tackling / 100);
-            if (this.rng.chance(foulProb)) cmd.tackle = true;
+            if (this.rng.chance(foulProb)) cmd.slide = true; // mistimede inglijder
           }
         }
       }
@@ -440,6 +458,8 @@ export class MatchSim {
 
     // Keeper met de bal mag niet buiten zijn strafschopgebied komen.
     this.clampKeeperWithBallToBox();
+    // Keepers blijven sowieso binnen hun eigen strafschopgebied (ook bij uitkomen).
+    this.clampKeepersToBox();
 
     // Keeper houdt de bal vast: tegenstanders moeten afstand houden.
     if (this.ballProtectedFor) {
@@ -566,23 +586,31 @@ export class MatchSim {
       const aimDir = this.aimDirection(p, intent);
       if (isOwner) {
         if (p.isKeeper) {
-          // Keeper verdeelt naar een teamgenoot in de kijkrichting. X = korte,
-          // ROLLENDE en goed te controleren pass; Z = verre, lofted uittrap.
+          // Keeper verdeelt. X = korte, ROLLENDE en goed te controleren pass naar
+          // een teamgenoot. Z = een ECHTE uittrap naar voren: hoe langer ingehouden,
+          // hoe harder én verder (geladen boomball downfield).
           const longBall = shoot;
-          const maxDist = longBall ? 70 : 38;
-          const mate = nearestTeammateInCone(
-            this.players,
-            p,
-            aimAngle(aimDir),
-            Math.PI * 0.6,
-            maxDist,
-          );
-          const dir = mate ? dirTo(p, mate.pos) : aimDir;
-          const d = mate ? dist(p.pos, mate.pos) : longBall ? 36 : 14;
-          const tId = mate?.id ?? null;
-          cmd.kick = longBall
-            ? { dir, power: clamp(16 + d * 0.45, 18, 32), loft: 4 + (hold >= 0.5 ? 4 : 0), curve: 0, targetId: tId }
-            : { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0, targetId: tId };
+          if (longBall) {
+            // Laad-fractie over ~0.6s inhouden -> power 24..42, loft 5..11.
+            const charge = clamp(hold / 0.6, 0, 1);
+            const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir), Math.PI * 0.6, 80);
+            // Bij een gerichte trap mag een teamgenoot 'm gaan halen; vol ingehouden
+            // is het meer een verre boombal in de richting (geen vaste ontvanger).
+            const dir = mate && charge < 0.85 ? dirTo(p, mate.pos) : aimDir;
+            const tId = charge < 0.85 ? mate?.id ?? null : null;
+            cmd.kick = {
+              dir,
+              power: clamp(24 + charge * 18, 24, 42),
+              loft: 5 + charge * 6,
+              curve: 0,
+              targetId: tId,
+            };
+          } else {
+            const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir), Math.PI * 0.6, 38);
+            const dir = mate ? dirTo(p, mate.pos) : aimDir;
+            const d = mate ? dist(p.pos, mate.pos) : 14;
+            cmd.kick = { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0, targetId: mate?.id ?? null };
+          }
         } else if (shoot) {
           // Een schot is ALTIJD zo hard als deze speler kan (op basis van zijn
           // shooting-stat) — een korte tik is dus al een vol schot. Langer
@@ -625,8 +653,10 @@ export class MatchSim {
           ? { dir: aimDir, power: 26, loft: 3, curve: 0 }
           : { dir: aimDir, power: 16, loft: 0, curve: 0 };
       } else {
-        // Sliding tackle richting de bal.
-        cmd.tackle = true;
+        // Niet aan de bal: X = sliding tackle (inglijden, kan overtreding worden),
+        // Z = staande tackle (poken, veilig, alleen winst als hij de bal raakt).
+        if (shoot) cmd.tackle = true;
+        else cmd.slide = true;
       }
     }
     return cmd;
@@ -670,17 +700,50 @@ export class MatchSim {
       p.pos.y = clamp(p.pos.y, -PLAYER_OOB, PITCH.height + PLAYER_OOB);
       // Keeper blijft ook tijdens de duik naar de bal kijken (duik = zijwaarts).
       p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+      // Sprong-arc: de duik gaat zijwaarts de LUCHT in en landt weer (z-as).
+      p.z = Math.max(0, (p.z ?? 0) + (p.vz ?? 0) * dt);
+      p.vz = (p.vz ?? 0) - BALL.gravity * dt;
+      if (p.z <= 0) p.vz = 0;
       p.stateTimer = Math.max(0, p.stateTimer - dt);
       return;
+    }
+
+    // Sliding tackle is een COMMITMENT: eenmaal ingezet glijdt de speler
+    // ballistisch door in de inzet-richting — NIET bij te sturen. Onderweg wordt
+    // contact afgehandeld: raakt hij de BAL dan wint hij 'm; raakt hij (zonder bal)
+    // het LIJF van een tegenstander dan is het een overtreding. Pas op echt
+    // contact, dus niet meer "te snel" een fluit.
+    if (p.state === "slide" && p.stateTimer > 0) {
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.vel.x *= Math.max(0, 1 - dt * 4); // glijdt uit
+      p.vel.y *= Math.max(0, 1 - dt * 4);
+      p.pos.x = clamp(p.pos.x, -PLAYER_OOB, PITCH.width + PLAYER_OOB);
+      p.pos.y = clamp(p.pos.y, -PLAYER_OOB, PITCH.height + PLAYER_OOB);
+      p.stateTimer = Math.max(0, p.stateTimer - dt);
+      this.resolveSlideContact(p);
+      return;
+    }
+
+    // Niet (meer) aan het duiken: keeper staat met beide voeten op de grond.
+    if (p.isKeeper) {
+      p.z = 0;
+      p.vz = 0;
     }
 
     // Beweging.
     moveTowards(p, cmd.move, cmd.sprint, dt);
 
-    // Een keeper kijkt altijd naar de bal (behalve als hij 'm zelf draagt en
-    // uittrapt) — zo blijft hij oogcontact houden en duikt hij zijwaarts.
-    if (p.isKeeper && this.ball.ownerId !== p.id) {
-      p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+    // Een keeper kijkt naar de bal als hij 'm niet heeft. Heeft hij 'm vast, dan
+    // kijkt hij RUSTIG het veld in (richting de aanval) en draait hij niet rond
+    // (de bal ligt vlak bij hem, dus naar-de-bal-kijken zou laten tollen).
+    if (p.isKeeper) {
+      if (this.ball.ownerId === p.id) {
+        const g = attackingGoal(p.side);
+        p.facing = angleOf({ x: g.x - p.pos.x, y: g.y - p.pos.y });
+      } else {
+        p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+      }
     }
 
     // Bal dragen: licht voor de speler uit "kleven". Balcontrole bepaalt hoe
@@ -733,53 +796,76 @@ export class MatchSim {
       p.stateTimer = 0.2;
     }
 
-    // Tackle (sliding) — uitzondering op de spelerbotsing: je mag inglijden.
-    if (cmd.tackle && p.tackleCooldown <= 0) {
+    // Tackles. Twee soorten:
+    //  - STAANDE tackle (cmd.tackle): poken naar de bal zonder in te glijden. Wint
+    //    alleen als hij de bal echt raakt; maakt vrijwel nooit een overtreding.
+    //  - SLIDING tackle (cmd.slide): inglijden met impuls (uitzondering op de
+    //    spelerbotsing). Wint de bal of, mis je 'm en raak je de man, overtreding.
+    if (cmd.slide && p.tackleCooldown <= 0) {
+      // Sliding STARTEN: vaste glij-impuls naar de bal (commitment). Het winnen
+      // van de bal / de overtreding wordt onderweg afgehandeld in de slide-branch
+      // hierboven (op echt contact), niet hier op het inzet-moment.
+      p.state = "slide";
+      p.stateTimer = 0.55;
+      p.tackleCooldown = 1.0;
+      p.slideTouched = false;
+      // Glij de STUURrichting op (waar de speler heen duwt), niet automatisch naar
+      // de bal. Geen input -> de huidige kijkrichting.
+      const lunge =
+        len(cmd.move) > 0.1
+          ? normalize(cmd.move)
+          : { x: Math.cos(p.facing), y: Math.sin(p.facing) };
+      p.vel.x = lunge.x * 12;
+      p.vel.y = lunge.y * 12;
+      p.facing = angleOf(lunge);
+      // Raakt hij op het inzet-moment al de bal of een tegenstander, meteen afhandelen.
+      this.resolveSlideContact(p);
+    } else if (cmd.tackle && p.tackleCooldown <= 0) {
+      // STAANDE tackle: instant poken; wint alleen als de bal echt binnen bereik
+      // is. Mist hij, dan raakt hij niemand hard -> geen overtreding.
       p.state = "tackle";
-      p.stateTimer = 0.35;
-      p.tackleCooldown = 0.9;
-      // Inglij-impuls richting de bal.
-      const lunge = dirTo(p, this.ball.pos);
-      p.vel.x += lunge.x * 6;
-      p.vel.y += lunge.y * 6;
-
-      // Beschermde bal (keeper vast): niet af te pakken door de tegenstander.
+      p.stateTimer = 0.3;
+      p.tackleCooldown = 0.6;
       const stealable = !this.ballProtectedFor || this.ballProtectedFor === p.side;
       const dBall = dist(p.pos, this.ball.pos);
-      if (stealable && dBall < PLAYER.tackleRange) {
-        // Bal binnen bereik: win 'm (kans schaalt met tackling).
+      if (stealable && dBall < PLAYER.tackleRange * 0.8) {
         const owner = this.byId(this.ball.ownerId);
-        const success =
-          !owner ||
-          owner.side !== p.side ||
-          this.rng.chance(0.55 + (p.stats.tackling - 50) / 180);
-        if (success) {
-          const dir = dirTo(p, this.ball.pos);
-          kickBall(this.ball, { dir, power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
-        }
-      } else if (stealable) {
-        // Bal niet bij de tackle: raak je een tegenstander -> overtreding.
-        const victim = this.nearestOpponentWithinTackle(p);
-        if (victim) {
-          this.pendingFoul = { spot: { ...victim.pos }, side: victim.side };
+        if (!owner || owner.side !== p.side || this.rng.chance(0.65 + (p.stats.tackling - 50) / 180)) {
+          kickBall(this.ball, { dir: dirTo(p, this.ball.pos), power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
         }
       }
     }
   }
 
-  /** Dichtstbijzijnde tegenstander binnen tackle-bereik (voor overtredingen). */
-  private nearestOpponentWithinTackle(p: PlayerEntity): PlayerEntity | null {
-    let best: PlayerEntity | null = null;
-    let bestD: number = PLAYER.tackleRange;
+  /**
+   * Contact-afhandeling tijdens een sliding tackle (zowel op het inzet-moment als
+   * onderweg). Raakt de glijder de BAL -> hij wint 'm (kans schaalt met tackling).
+   * Raakt hij (zonder bal) het LIJF van een tegenstander -> overtreding. Eén keer
+   * per slide (slideTouched), zodat het echt op contact gebeurt en niet "te snel".
+   */
+  private resolveSlideContact(p: PlayerEntity): void {
+    if (p.slideTouched) return;
+    const stealable = !this.ballProtectedFor || this.ballProtectedFor === p.side;
+    if (!stealable) return;
+    const dBall = dist(p.pos, this.ball.pos);
+    if (dBall < PLAYER.tackleRange) {
+      p.slideTouched = true;
+      const owner = this.byId(this.ball.ownerId);
+      if (!owner || owner.side !== p.side || this.rng.chance(0.5 + (p.stats.tackling - 50) / 180)) {
+        kickBall(this.ball, { dir: dirTo(p, this.ball.pos), power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
+      }
+      return;
+    }
+    // Contact-afstand ~ twee lijven die elkaar raken + het gestrekte glij-been.
+    const contact = PLAYER.radius * 2 + 0.25;
     for (const o of this.players) {
       if (o.side === p.side) continue;
-      const d = dist(o.pos, p.pos);
-      if (d < bestD) {
-        bestD = d;
-        best = o;
+      if (dist(o.pos, p.pos) < contact) {
+        p.slideTouched = true;
+        this.pendingFoul = { spot: { ...o.pos }, side: o.side };
+        return;
       }
     }
-    return best;
   }
 
   /** Spelers kunnen niet overlappen; ze duwen elkaar (tacklende glijdt door). */
@@ -788,10 +874,10 @@ export class MatchSim {
     const n = this.players.length;
     for (let i = 0; i < n; i++) {
       const a = this.players[i]!;
-      if (a.state === "tackle") continue;
+      if (a.state === "slide") continue; // inglijder glijdt door
       for (let j = i + 1; j < n; j++) {
         const b = this.players[j]!;
-        if (b.state === "tackle") continue;
+        if (b.state === "slide") continue;
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const d = Math.hypot(dx, dy);
@@ -947,7 +1033,53 @@ export class MatchSim {
       this.takeRestart(dirTo(taker, { x: goal.x, y: targetY }), 36, 0.5);
       return;
     }
-    // AI neemt in: speel naar een teamgenoot (anders richting doel).
+    const cy = PITCH.height / 2;
+    // AI-doeltrap WISSELT: soms een verre, hoge boombal naar voren, soms laag
+    // opbouwen naar een vrije man. Zo wordt 'ie niet altijd kort/laag genomen.
+    if (this.restartKind === "goalkick") {
+      if (this.rng.chance(0.5)) {
+        // Hoge, lange uittrap richting de andere helft.
+        const downfield: Vec2 = {
+          x: taker.pos.x + (goal.x - taker.pos.x) * 0.6,
+          y: clamp(cy + this.rng.range(-18, 18), 6, PITCH.height - 6),
+        };
+        const mate = nearestTeammateInCone(this.players, taker, aimAngle(dirTo(taker, goal)), Math.PI * 0.5, 95);
+        const tgt = mate ? mate.pos : downfield;
+        const d = dist(taker.pos, tgt);
+        this.takeRestart(dirTo(taker, tgt), clamp(20 + d * 0.35, 28, 42), 7 + this.rng.range(0, 3), mate?.id ?? null);
+        return;
+      }
+      // Laag opbouwen.
+      const mate = chooseBestPass(this.players, taker, this.players.filter((p) => p.side !== taking));
+      const tgt = mate ? mate.pos : { x: taker.pos.x + (goal.x - taker.pos.x) * 0.3, y: cy };
+      const d = dist(taker.pos, tgt);
+      this.takeRestart(dirTo(taker, tgt), clamp(13 + d * 0.5, 14, 28), 0, mate?.id ?? null);
+      return;
+    }
+    // AI-hoekschop WISSELT: meestal een hoge voorzet de box in, soms kort.
+    if (this.restartKind === "corner") {
+      const toFieldX = goal.x === 0 ? 1 : -1;
+      if (this.rng.chance(0.65)) {
+        // Hoge voorzet naar de rand van het doelgebied (eigen spelers duiken in).
+        const target: Vec2 = {
+          x: goal.x + toFieldX * (PITCH.goalAreaDepth + 3),
+          y: clamp(cy + this.rng.range(-6, 6), 6, PITCH.height - 6),
+        };
+        const d = dist(taker.pos, target);
+        this.takeRestart(dirTo(taker, target), clamp(14 + d * 0.5, 18, 32), 8 + this.rng.range(0, 2.5));
+        return;
+      }
+      // Korte hoek naar een aangever.
+      const mate =
+        chooseBestPass(this.players, taker, this.players.filter((p) => p.side !== taking)) ??
+        nearestTeammateInCone(this.players, taker, taker.facing, Math.PI, 30);
+      const tgt = mate ? mate.pos : goal;
+      const d = dist(taker.pos, tgt);
+      this.takeRestart(dirTo(taker, tgt), clamp(12 + d * 0.5, 13, 26), 0, mate?.id ?? null);
+      return;
+    }
+    // Overige hervattingen (vrije trap/inworp): speel naar een vrije man, anders
+    // richting doel.
     const opponents = this.players.filter((p) => p.side !== taking);
     const mate =
       chooseBestPass(this.players, taker, opponents) ??
@@ -981,6 +1113,23 @@ export class MatchSim {
     // Bal mee naar de keeper (hij draagt 'm).
     this.ball.pos.x = owner.pos.x;
     this.ball.pos.y = owner.pos.y;
+  }
+
+  /** Houd elke keeper binnen zijn eigen strafschopgebied (ook zonder bal, dus
+   *  ook bij uitkomen/duiken komt hij niet buiten de zone). */
+  private clampKeepersToBox(): void {
+    const depth = PITCH.penaltyBoxDepth;
+    const halfW = PITCH.penaltyBoxWidth / 2;
+    const minY = PITCH.height / 2 - halfW + 0.4;
+    const maxY = PITCH.height / 2 + halfW - 0.4;
+    for (const p of this.players) {
+      if (!p.isKeeper) continue;
+      p.pos.x =
+        p.side === "home"
+          ? clamp(p.pos.x, 0, depth - 0.4)
+          : clamp(p.pos.x, PITCH.width - depth + 0.4, PITCH.width);
+      p.pos.y = clamp(p.pos.y, minY, maxY);
+    }
   }
 
   /** Duw tegenstanders van de hervattende ploeg radiaal weg van de bal. */
@@ -1095,6 +1244,41 @@ export class MatchSim {
     p.diveTarget = { x: lineX, y: crossY };
     p.state = "dive";
     p.stateTimer = 0.45;
+    p.z = 0;
+    p.vz = KEEPER_DIVE_VZ;
+  }
+
+  /**
+   * Uitkomen + smoren bij een 1v1: komt een tegenstander met de bal alleen op de
+   * keeper af binnen het strafschopgebied (geen verdediger ertussen), dan lanceert
+   * de keeper zich naar de bal (duik vooruit). Komt hij erbij, dan claimt/bokst
+   * keeperSaves de bal. Bewust een commitment: mist hij, dan ligt hij en kan de
+   * aanvaller 'm omspelen.
+   */
+  private tryKeeperSmother(gk: PlayerEntity): void {
+    if (gk.state === "dive") return; // al onderweg
+    if (this.ball.ownerId === gk.id) return;
+    const ownGoal = gk.side === "home" ? { x: 0, y: PITCH.height / 2 } : { x: PITCH.width, y: PITCH.height / 2 };
+    const speed = len(this.ball.vel);
+    // Zelfde strikte 1v1-check als de uitloop-AI: alleen bij een centraal
+    // doorgebroken aanvaller (geen zijkant, geen man ertussen).
+    if (!isKeeperOneOnOne(this.players, gk, this.ball, ownGoal, speed)) return;
+
+    // Pas duiken als de bal binnen lung-afstand is (anders eerst lopend uitkomen).
+    const gapX = this.ball.pos.x - gk.pos.x;
+    const gapY = this.ball.pos.y - gk.pos.y;
+    const gap = Math.hypot(gapX, gapY);
+    if (gap > 4.5 || gap < 0.4) return;
+
+    // Lanceer-impuls naar de bal (sneller dan lopen: het is een sprong).
+    const v = Math.min(7, gap / 0.16);
+    gk.vel.x = (gapX / gap) * v;
+    gk.vel.y = (gapY / gap) * v;
+    gk.diveTarget = { x: this.ball.pos.x, y: this.ball.pos.y };
+    gk.state = "dive";
+    gk.stateTimer = 0.5;
+    gk.z = 0;
+    gk.vz = KEEPER_DIVE_VZ;
   }
 
   /**
@@ -1204,6 +1388,8 @@ export class MatchSim {
     this.ball.lastTouchId = gk.id;
     gk.state = "dive";
     gk.stateTimer = 0.6;
+    gk.z = 0;
+    gk.vz = KEEPER_DIVE_VZ;
   }
 
   /** Doelpuntdetectie. Returnt true als er gescoord is. */
@@ -1519,25 +1705,26 @@ export class MatchSim {
     const cy = PITCH.height / 2;
     const defendingSide = otherSide(takingSide);
 
-    // Verdedigende keeper op de doellijn.
+    // Verdedigende keeper op de doellijn; de nemer op de stip.
     const gk = this.players.find((p) => p.isKeeper && p.side === defendingSide);
     if (gk) m.set(gk.id, { x: clamp(gx + sign * 0.6, 0, PITCH.width), y: cy });
+    const spotX = gx === 0 ? PITCH.penaltySpotDist : PITCH.width - PITCH.penaltySpotDist;
+    if (takerId) m.set(takerId, { x: spotX, y: cy });
 
-    // Alle veldspelers (beide ploegen) behalve de nemer wachten net buiten de
-    // box, gespreid in rijen aan de rand van het strafschopgebied.
-    const edgeX = gx + sign * (PITCH.penaltyBoxDepth + 2);
-    const waiters = this.players.filter((p) => !p.isKeeper && p.id !== takerId);
-    const perRow = 5;
-    const spacing = 6;
-    waiters.forEach((p, i) => {
-      const row = Math.floor(i / perRow);
-      const col = i % perRow;
-      const yy = cy + (col - (perRow - 1) / 2) * spacing;
-      m.set(p.id, {
-        x: clamp(edgeX + sign * row * 3.2, 2, PITCH.width - 2),
-        y: clamp(yy, 4, PITCH.height - 4),
-      });
-    });
+    // Iedereen anders houdt gewoon zijn FORMATIEPOSITIE (anchor); alleen wie in
+    // het strafschopgebied zou staan, schuift tot net buiten de box (de regel:
+    // op de nemer en keeper na mag niemand in het gebied tot er getrapt is).
+    const boxDepth = PITCH.penaltyBoxDepth;
+    const halfBoxW = PITCH.penaltyBoxWidth / 2;
+    const edgeX = gx + sign * (boxDepth + 1.5);
+    for (const p of this.players) {
+      if (p.isKeeper || p.id === takerId) continue;
+      const t: Vec2 = { ...p.anchor };
+      const inDepth = sign === 1 ? t.x < boxDepth : t.x > PITCH.width - boxDepth;
+      const inWidth = Math.abs(t.y - cy) < halfBoxW;
+      if (inDepth && inWidth) t.x = edgeX; // net buiten de box, eigen y behouden
+      m.set(p.id, { x: clamp(t.x, 2, PITCH.width - 2), y: clamp(t.y, 4, PITCH.height - 4) });
+    }
 
     return m;
   }
@@ -1649,18 +1836,33 @@ export class MatchSim {
     // nog hoog, dus klem de voorhoede op de buitenspellijn (bal op de doellijn).
     clampOffside(m, this.players, takingSide, { x: ownGoalX, y: PITCH.height / 2 });
 
-    // Tegenstander zakt ECHT terug bij een doeltrap: de voorste spelers staan
-    // rond de middenlijn, de verdedigers op de eigen helft. Zo houdt de keeper
-    // de box + opbouwzone vrij en heeft hij gewoon korte afspeelmogelijkheden.
-    // (advForward = doel-ver-kant van de nemer; hoog adv = dichter bij middenlijn.)
+    // Tegenstander zakt terug bij een doeltrap: de meeste spelers rond/achter de
+    // middenlijn. MAAR de twee meest aanvallende staan NIET tussen de keeper en
+    // zijn verdedigers (in de opbouwzone) — die zetten zich net ACHTER de
+    // verdedigerslinie (doel-ver-kant), klaar om een korte opbouwpass te
+    // onderscheppen zonder in de box te kampen.
+    const defLineX = baseX; // waar de opbouwende verdedigers staan (box-rand)
+    const behind = (extra: number): number =>
+      clamp(defLineX + sign * extra, 4, PITCH.width - 4); // net achter de verdedigers
     const advForward = ownGoalX + sign * (PITCH.width * 0.46); // rond de middenlijn
     const deepBack = ownGoalX + sign * (PITCH.width * 0.66); // op de eigen helft
-    for (const p of this.players) {
-      if (p.side === takingSide || p.isKeeper) continue;
-      const adv = clamp(roleAdvance(p.position) / 0.55, 0, 1);
-      const x = clamp(deepBack + (advForward - deepBack) * adv, 4, PITCH.width - 4);
-      m.set(p.id, { x, y: clamp(p.anchor.y, 5, PITCH.height - 5) });
-    }
+    const opp = this.players
+      .filter((p) => p.side !== takingSide && !p.isKeeper)
+      .sort((a, b) => roleAdvance(b.position) - roleAdvance(a.position));
+    // Minimale terugtrek-afstand: NIEMAND van de tegenpartij blijft pal voor de
+    // keeper/box hangen — ook de voorste spitsen zakken flink terug.
+    const minRetreat = behind(14);
+    const pushedBack = (x: number): number => (sign === 1 ? Math.max(x, minRetreat) : Math.min(x, minRetreat));
+    opp.forEach((p, i) => {
+      let x: number;
+      if (i === 0) x = behind(14); // spits: ruim achter de verdedigers
+      else if (i === 1) x = behind(20); // tweede aanvaller nog verder terug
+      else {
+        const adv = clamp(roleAdvance(p.position) / 0.55, 0, 1);
+        x = clamp(deepBack + (advForward - deepBack) * adv, 4, PITCH.width - 4);
+      }
+      m.set(p.id, { x: pushedBack(x), y: clamp(p.anchor.y, 5, PITCH.height - 5) });
+    });
     return m;
   }
 
@@ -1815,6 +2017,14 @@ export class MatchSim {
     this.phase = "deadball";
   }
 
+  /** Animatie-stijl waarmee een speler de bal vasthoudt (zie MatchSnapshotPlayer.hold). */
+  private holdStyle(p: PlayerEntity): "throw" | "keeper" | null {
+    if (this.ball.ownerId !== p.id) return null;
+    if (this.restartKind === "throwin" && p.id === this.restartTakerId) return "throw";
+    if (p.isKeeper && this.ballProtectedFor === p.side) return "keeper";
+    return null;
+  }
+
   /** Lichtgewicht snapshot voor de renderer/UI. */
   snapshot(): MatchSnapshot {
     const activePlayer = this.humanSide ? this.byId(this.activeId[this.humanSide]) : null;
@@ -1830,11 +2040,13 @@ export class MatchSim {
         skinColor: p.skinColor,
         x: p.pos.x,
         y: p.pos.y,
+        z: p.z ?? 0,
         facing: p.facing,
         state: p.state,
         isKeeper: p.isKeeper,
         isActive: this.activeId[p.side] === p.id,
         hasBall: this.ball.ownerId === p.id,
+        hold: this.holdStyle(p),
       })),
       ball: { x: this.ball.pos.x, y: this.ball.pos.y, z: this.ball.z },
       score: { ...this.score },
