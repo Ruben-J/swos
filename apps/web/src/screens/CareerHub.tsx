@@ -78,7 +78,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   const season = ws.seasons.find((s) => s.id === ws.activeSeasonId)!;
 
   const [tab, setTab] = useState<
-    "overzicht" | "selectie" | "tactiek" | "training" | "jeugd" | "kalender" | "transfers" | "competities"
+    "overzicht" | "selectie" | "tactiek" | "training" | "jeugd" | "kalender" | "transfers" | "competities" | "financien"
   >("overzicht");
 
   const compName = (id: UUID): string => ws.competitions.find((c) => c.id === id)?.name ?? "";
@@ -198,6 +198,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
             >
               Transfers
             </button>
+            <button
+              className={`ch-tab${tab === "financien" ? " sel" : ""}`}
+              onClick={() => setTab("financien")}
+            >
+              Financiën
+            </button>
           </div>
           <div className="ch-date">{formatShort(season.currentDate)}</div>
           <button className="btn" onClick={onExit}>
@@ -247,6 +253,7 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
       {tab === "competities" && <CompetitionsView save={save} />}
 
       {tab === "transfers" && <TransfersView save={save} onUpdate={onUpdate} />}
+      {tab === "financien" && <FinancesView save={save} />}
 
       <div className="ch-body" style={tab !== "overzicht" ? { display: "none" } : undefined}>
         <section className="ch-panel ch-next">
@@ -966,6 +973,48 @@ function money(n: number): string {
 }
 
 const POSITIONS = ["GK", "RB", "LB", "CB", "DM", "CM", "AM", "RW", "LW", "ST"];
+
+function FinancesView({ save }: { save: CareerSave }) {
+  const ws = save.worldState;
+  const myId = save.manager.currentTeamId;
+  const myTeam = ws.teams.find((t) => t.id === myId)!;
+  const fin = myTeam.finances;
+  const s = fin.season;
+  const last = fin.lastMatchday;
+  const seasonNet = s ? s.gate + s.sponsor + s.prize - s.wages : 0;
+
+  return (
+    <div className="ch-body">
+      <section className="ch-panel ch-fin">
+        <h2>Financiën</h2>
+        <div className="fin-grid">
+          <div><span>Saldo</span><strong>{money(fin.balance)}</strong></div>
+          <div><span>Transferbudget</span><strong>{money(fin.transferBudget)}</strong></div>
+          <div><span>Loon/week</span><strong>{money(weeklyWageBill(save, myId))}</strong></div>
+          <div><span>Sponsortier</span><strong>{fin.sponsorTier}/5</strong></div>
+        </div>
+
+        <h3 className="ch-recent-title">Dit seizoen</h3>
+        <div className="fin-grid">
+          <div><span>Recettes</span><strong>{money(s?.gate ?? 0)}</strong></div>
+          <div><span>Sponsor/TV</span><strong>{money(s?.sponsor ?? 0)}</strong></div>
+          <div><span>Lonen</span><strong>−{money(s?.wages ?? 0)}</strong></div>
+          <div><span>Prijzengeld</span><strong>{money(s?.prize ?? 0)}</strong></div>
+          <div><span>Saldo dit seizoen</span><strong>{seasonNet >= 0 ? "+" : "−"}{money(Math.abs(seasonNet))}</strong></div>
+        </div>
+
+        {last ? (
+          <div className="fin-last">
+            Laatste speeldag ({last.date}): recette {money(last.gate)} + sponsor {money(last.sponsor)} − lonen{" "}
+            {money(last.wages)} = <strong>{last.net >= 0 ? "+" : "−"}{money(Math.abs(last.net))}</strong>
+          </div>
+        ) : (
+          <div className="fin-last">Nog geen speeldag afgewerkt dit seizoen.</div>
+        )}
+      </section>
+    </div>
+  );
+}
 
 function TransfersView({ save, onUpdate }: { save: CareerSave; onUpdate: (s: CareerSave) => void }) {
   const ws = save.worldState;

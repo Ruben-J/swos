@@ -7,6 +7,7 @@ import { processKnockouts } from "./knockout.js";
 import { processTraining } from "./training.js";
 import { processAiTransfers } from "./aitransfers.js";
 import { transferWindowOpen } from "./transfers.js";
+import { applyMatchdayFinances } from "./finances.js";
 
 /** Bereken team-ratings (0..100) uit de spelers in de save. */
 export function buildRatings(save: CareerSave): Map<UUID, number> {
@@ -98,6 +99,8 @@ function simulateDate(
   processTraining(save, rng, save.manager.currentTeamId, save.manager.trainingFocus ?? "balanced");
   // AI-clubs handelen onderling als de transferperiode open is.
   if (transferWindowOpen(save)) processAiTransfers(save, rng);
+  // Boek de seizoenseconomie van de club van de speler voor deze speeldag.
+  applyMatchdayFinances(save, rng, date);
 }
 
 /** Zet de seizoensdatum op de eerstvolgende nog te spelen wedstrijd. */

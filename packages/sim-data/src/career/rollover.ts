@@ -10,6 +10,7 @@ import { buildCupsAndEuro, buildSeasonFixtures } from "../world/build.js";
 import { divisionStandings } from "./season.js";
 import { processYouthIntake } from "./youth.js";
 import { generateJobOffers, updateManagerReputation } from "./jobs.js";
+import { applySeasonPrizeMoney } from "./finances.js";
 
 export interface PromotionMove {
   teamId: UUID;
@@ -60,6 +61,11 @@ export function advanceToNextSeason(
     if (myDiv && rank > 0) {
       updateManagerReputation(save, rank, order.length, myDiv.tier);
     }
+    // Prijzengeld voor het afgelopen seizoen (klassering + beker/Europa).
+    applySeasonPrizeMoney(save);
+    // Seizoenstotalen resetten voor het nieuwe seizoen.
+    if (myTeam.finances.season) myTeam.finances.season = { gate: 0, sponsor: 0, wages: 0, prize: 0 };
+    myTeam.finances.lastMatchday = undefined;
   }
 
   // Promotie/degradatie per land, tussen tier t en t+1.

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { MatchConfig } from "@pitch/engine";
 import { Rng, hashSeed, type CareerSave, type Match } from "@pitch/shared";
-import { advanceToNextSeason, playMatchday, quickMatchSetup } from "@pitch/sim-data";
+import { advanceToNextSeason, playMatchday } from "@pitch/sim-data";
 import { MainMenu } from "./screens/MainMenu.js";
 import { MatchScreen } from "./screens/MatchScreen.js";
 import { CareerSetup } from "./career/CareerSetup.js";
@@ -22,13 +22,6 @@ export function App() {
 
   const startQuickConfig = useCallback((cfg: MatchConfig) => {
     setConfig(cfg);
-    setCareerMatch(null);
-    setScreen("match");
-  }, []);
-
-  const startLocalVersus = useCallback(() => {
-    const { seed, home, away } = quickMatchSetup(`versus-${Date.now()}`);
-    setConfig({ seed, home, away, humanSide: "home" });
     setCareerMatch(null);
     setScreen("match");
   }, []);
@@ -132,7 +125,6 @@ export function App() {
   return (
     <MainMenu
       onQuickMatch={() => setScreen("quickSetup")}
-      onLocalVersus={startLocalVersus}
       onCareer={() => setScreen("careerSetup")}
       onLoadCareer={() => setScreen("careerLoad")}
     />
