@@ -1,6 +1,21 @@
-import { Application, Container, Graphics } from "pixi.js";
+import { Application, Container, Graphics, Sprite } from "pixi.js";
 import { PITCH, PLAYER, clamp, lerp } from "@pitch/shared";
 import type { CameraView, MatchSnapshot, MatchSnapshotPlayer } from "@pitch/engine";
+import {
+  getPersonTexture,
+  getPoseTexture,
+  PERSON_SCALE,
+  PERSON_ANCHOR_X,
+  PERSON_ANCHOR_Y,
+} from "./pixelPerson";
+
+/** Maak een lege speler-/official-sprite met het juiste voet-anchor en schaal. */
+function makePersonSprite(): Sprite {
+  const sprite = new Sprite();
+  sprite.anchor.set(PERSON_ANCHOR_X, PERSON_ANCHOR_Y);
+  sprite.scale.set(PERSON_SCALE);
+  return sprite;
+}
 
 const PX_PER_UNIT = 11;
 
@@ -23,11 +38,14 @@ interface PersonLook {
   hair: number;
   skin: number;
   shorts: number;
+  socks: number;
 }
 
 interface PlayerNode {
   container: Container;
-  body: Graphics;
+  // Pixel-art-sprite voor álle poses: staand/lopend (voet-anchor) en de liggende
+  // duik-/glijposes (midden-anchor + rotatie).
+  sprite: Sprite;
   ring: Graphics;
   shadow: Graphics;
   look: PersonLook;
@@ -84,7 +102,7 @@ export class MatchRenderer {
   private officials: {
     kind: "ref" | "lineA" | "lineB";
     container: Container;
-    body: Graphics;
+    sprite: Sprite;
     pos: { x: number; y: number };
     facing: number;
     look: PersonLook;
@@ -425,15 +443,16 @@ export class MatchRenderer {
       hair: 0x2e2018,
       skin: 0xe6b48c,
       shorts: 0x1a1a1a,
+      socks: 0x1a1a1a,
     };
     const make = (kind: "ref" | "lineA" | "lineB", x: number, y: number, facing: number) => {
       const container = new Container();
-      const body = new Graphics();
+      const sprite = makePersonSprite();
       const shadow = new Graphics().ellipse(0, 1, 5.2, 2.4).fill({ color: 0x000000, alpha: 0.28 });
-      this.drawPerson(body, look, facing);
-      container.addChild(shadow, body);
+      sprite.texture = getPersonTexture(look, facing, 0, null);
+      container.addChild(shadow, sprite);
       this.sprites.addChild(container);
-      this.officials.push({ kind, container, body, pos: { x, y }, facing, look, phase: 0 });
+      this.officials.push({ kind, container, sprite, pos: { x, y }, facing, look, phase: 0 });
     };
     // Scheids start bij de tunnel (middenlijn, buiten de bovenlijn) en loopt mee
     // het veld op tijdens de walkout — niet zomaar op de middenstip.
@@ -513,8 +532,10 @@ export class MatchRenderer {
       o.container.position.set(s.x, s.y);
       o.container.scale.set(zoom);
       o.container.zIndex = s.y;
-      // Staande sprite: niet meedraaien, alleen de kijkrichting hertekenen.
-      this.drawPerson(o.body, o.look, o.facing + rot, o.phase);
+      // Staande sprite: kijkrichting + loopframe op de pixel-art zetten.
+      const moving = dist > 0.001;
+      const frame = moving ? (Math.floor(o.phase * 0.5) % 2) + 1 : 0;
+      o.sprite.texture = getPersonTexture(o.look, o.facing + rot, frame, null);
     }
   }
 
@@ -523,149 +544,26 @@ export class MatchRenderer {
     if (node) return node;
     const container = new Container();
     const shadow = new Graphics().ellipse(0, 1, 5.2, 2.4).fill({ color: 0x000000, alpha: 0.28 });
-    const body = new Graphics();
+    const sprite = makePersonSprite();
     const ring = new Graphics();
     const col = this.colors[p.side];
+    const primary = hexToNum(col.primary);
+    const secondary = hexToNum(col.secondary);
     const look: PersonLook = {
-      shirt: p.isKeeper ? 0x2bd06a : hexToNum(col.primary),
-      accent: p.isKeeper ? 0x125a30 : hexToNum(col.secondary),
+      shirt: p.isKeeper ? 0x2bd06a : primary,
+      accent: p.isKeeper ? 0x125a30 : secondary,
       pattern: p.isKeeper ? "plain" : col.pattern ?? "plain",
       hair: hexToNum(p.hairColor),
       skin: hexToNum(p.skinColor),
-      shorts: 0xf0f0f0,
+      shorts: p.isKeeper ? 0x161616 : pickShorts(primary, secondary),
+      socks: p.isKeeper ? 0x0e4423 : secondary,
     };
-    // Ring onder de sprite (grond), body bovenop.
-    container.addChild(shadow, ring, body);
+    // Ring/schaduw onder de sprite (grond), sprite bovenop.
+    container.addChild(shadow, ring, sprite);
     this.sprites.addChild(container);
-    node = { container, body, ring, shadow, look, phase: 0, px: p.x, py: p.y, diveDir: { x: 1, y: 0 } };
+    node = { container, sprite, ring, shadow, look, phase: 0, px: p.x, py: p.y, diveDir: { x: 1, y: 0 } };
     this.players.set(p.id, node);
     return node;
-  }
-
-  /**
-   * Teken een rechtopstaand SWOS-mannetje. De voeten staan op de oorsprong
-   * (0,0), het lichaam loopt omhoog (−y). `face` is de schermhoek van de
-   * kijkrichting (0 = rechts, +π/2 = naar de kijker toe / scherm-onder): die
-   * bepaalt of we het gezicht of de achterkant van het hoofd zien en welke kant
-   * de speler op leunt — de sprite zelf draait NIET mee.
-   */
-  private drawPerson(
-    g: Graphics,
-    look: PersonLook,
-    face: number,
-    phase = 0,
-    hold: "throw" | "keeper" | null = null,
-  ): void {
-    g.clear();
-    const fwd = Math.sin(face); // >0 = naar de kijker (gezicht), <0 = van ons af (rug)
-    const side = Math.cos(face); // links/rechts-component
-    const dark = 0x101010;
-
-    // Loop-cyclus: benen stappen tegengesteld, armen zwaaien tegengesteld aan de
-    // benen, en het lijf bobt licht op en neer. `phase` loopt op met de afgelegde
-    // afstand, dus stilstaand bevriest de pose.
-    const sw = Math.sin(phase); // -1..1
-    const bob = -Math.abs(Math.cos(phase)) * 0.5; // lichaam iets omhoog bij de pas
-
-    // Benen (twee): elke voet stapt naar voren/achter (zijwaarts) en heft licht.
-    const legSpread = 1.1;
-    const legShift = side * 0.5;
-    for (const sgn of [-1, 1]) {
-      const swing = sgn === 1 ? sw : -sw;
-      const lift = Math.max(0, swing) * 1.4; // geheven voet = korter been
-      const x = sgn * legSpread - 0.7 + legShift + swing * 0.9;
-      g.rect(x, -3.4, 1.4, 3.6 - lift).fill(0x2a2a2a);
-    }
-    // Korte broek.
-    g.roundRect(-2.4, -6.4 + bob, 4.8, 3.4, 1.2).fill(look.shorts).stroke({ width: 0.6, color: dark, alpha: 0.5 });
-
-    // Romp (shirt), licht leunend in de looprichting + bob.
-    const lean = side * 0.6;
-    g.roundRect(-2.6 + lean, -10.6 + bob, 5.2, 4.6, 1.8)
-      .fill(look.shirt)
-      .stroke({ width: 0.8, color: dark, alpha: 0.6 });
-    // Shirtpatroon.
-    if (look.pattern === "centre") {
-      g.rect(-0.7 + lean, -10.6 + bob, 1.4, 4.6).fill(look.accent);
-    } else if (look.pattern === "stripes") {
-      for (const dx of [-1.8, 0, 1.8]) {
-        g.rect(dx - 0.45 + lean, -10.6 + bob, 0.9, 4.6).fill(look.accent);
-      }
-    }
-    // Armen: zwaaiend bij het lopen, omhoog bij een ingooi, naar voren bij de keeper.
-    const arm = { width: 0.5, color: dark, alpha: 0.5 } as const;
-    if (hold === "throw") {
-      // Beide armen gestrekt omhoog naast het hoofd (bal komt boven het hoofd).
-      g.rect(-2.9 + lean, -16.4 + bob, 1.1, 6.2).fill(look.shirt).stroke(arm);
-      g.rect(1.8 + lean, -16.4 + bob, 1.1, 6.2).fill(look.shirt).stroke(arm);
-    } else if (hold === "keeper") {
-      // Armen naar voren/omhoog om de bal tegen de borst te klemmen.
-      g.rect(-3.2 + lean, -9.4 + bob, 1.2, 3.2).fill(look.shirt).stroke(arm);
-      g.rect(2.0 + lean, -9.4 + bob, 1.2, 3.2).fill(look.shirt).stroke(arm);
-    } else {
-      g.rect(-3.4 + lean, -10.2 + bob - sw * 0.8, 1.0, 3.4).fill(look.shirt).stroke(arm);
-      g.rect(2.4 + lean, -10.2 + bob + sw * 0.8, 1.0, 3.4).fill(look.shirt).stroke(arm);
-    }
-
-    // Hoofd: bol haar als basis, gezicht (huid) verschijnt aan de kant waar de
-    // speler heen kijkt. Kijkt hij van ons af (fwd<0) -> alleen achterhoofd/haar.
-    const hx = lean + side * 0.6;
-    const hy = -12.4 + bob;
-    g.circle(hx, hy, 2.4).fill(look.hair).stroke({ width: 0.7, color: dark, alpha: 0.6 });
-    if (fwd > -0.25) {
-      const faceCx = hx + side * 0.7;
-      const faceCy = hy + fwd * 0.7;
-      g.circle(faceCx, faceCy, 1.5).fill(look.skin);
-    }
-  }
-
-  /**
-   * Teken een duikende keeper: liggend lichaam langs +x (de container-rotatie
-   * zet +x op de sprongrichting), benen slepend achter, armen + handschoenen
-   * gestrekt naar de bal toe, hoofd vooraan. Leest als een echte zijwaartse duik.
-   */
-  private drawKeeperDive(g: Graphics, look: PersonLook): void {
-    g.clear();
-    const dark = 0x101010;
-    const out = { width: 0.6, color: dark, alpha: 0.6 } as const;
-    // Benen slepen achter het lichaam (-x).
-    g.rect(-8.6, -1.9, 4.4, 1.5).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    g.rect(-8.6, 0.4, 4.4, 1.5).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    // Broek + liggende romp (shirt).
-    g.ellipse(-4.2, 0, 2.3, 2.1).fill(look.shorts).stroke(out);
-    g.ellipse(-0.6, 0, 3.7, 2.6).fill(look.shirt).stroke(out);
-    // Armen gestrekt naar de bal (+x) met handschoenen (huid) aan het eind.
-    g.rect(2.0, -1.9, 4.8, 1.2).fill(look.shirt).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    g.rect(2.0, 0.7, 4.8, 1.2).fill(look.shirt).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    g.circle(7.2, -1.3, 1.35).fill(look.skin).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    g.circle(7.2, 1.3, 1.35).fill(look.skin).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    // Hoofd vooraan-boven het lichaam.
-    g.circle(2.8, -2.6, 2.3).fill(look.hair).stroke({ width: 0.7, color: dark, alpha: 0.6 });
-    g.circle(3.7, -2.3, 1.4).fill(look.skin);
-  }
-
-  /**
-   * Teken een inglijdende veldspeler: liggend langs +x (container-rotatie zet +x
-   * op de glij-richting), één been gestrekt naar voren (de tackle), het andere
-   * gebogen, romp + hoofd erachter. Leest als een sliding tackle.
-   */
-  private drawPlayerSlide(g: Graphics, look: PersonLook): void {
-    g.clear();
-    const dark = 0x101010;
-    const out = { width: 0.6, color: dark, alpha: 0.6 } as const;
-    // Gestrekt tackle-been naar voren (+x), schoen aan het eind.
-    g.rect(0.5, -0.6, 6.2, 1.4).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    g.circle(7.0, 0.1, 1.1).fill(0x161616);
-    // Gebogen tweede been.
-    g.rect(-1.2, 1.0, 4.2, 1.3).fill(0x2a2a2a).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    // Broek + liggende romp (shirt).
-    g.ellipse(-2.4, -0.2, 2.1, 2.0).fill(look.shorts).stroke(out);
-    g.ellipse(-4.6, -0.6, 3.2, 2.4).fill(look.shirt).stroke(out);
-    // Steunarm naar achter.
-    g.rect(-7.2, -1.8, 2.6, 1.0).fill(look.shirt).stroke({ width: 0.5, color: dark, alpha: 0.5 });
-    // Hoofd achteraan.
-    g.circle(-6.6, -1.0, 2.2).fill(look.hair).stroke({ width: 0.7, color: dark, alpha: 0.6 });
-    g.circle(-6.0, -0.4, 1.3).fill(look.skin);
   }
 
   /** Projecteer een pitch-positie (units) naar schermpixels met dezelfde
@@ -759,31 +657,36 @@ export class MatchRenderer {
       // gezicht of de achterkant van het hoofd zien (geen meedraaiende sprite).
       const pf = pp ? lerpAngle(pp.facing, p.facing, alpha) : p.facing;
       const hold = p.hold;
+      const sp = node.sprite;
       if (p.isKeeper && p.state === "dive") {
-        // Liggende duik-sprite, door de LUCHT getild op zijn hoogte (z); schaduw
-        // blijft op de grond. Oriëntatie: beweegt hij echt (uitlopen/zijwaartse
-        // duik) dan langs de sprong; duikt hij ter plekke (reflex) dan naar de bal
-        // toe -> zo kan hij ook naar voren of achteren duiken, niet enkel zijwa.
-        this.drawKeeperDive(node.body, node.look);
+        // Liggende duik-pixelsprite, door de LUCHT getild op zijn hoogte (z);
+        // schaduw blijft op de grond. Oriëntatie: beweegt hij echt dan langs de
+        // sprong; duikt hij ter plekke (reflex) dan naar de bal toe.
+        sp.texture = getPoseTexture(node.look, "dive");
+        sp.anchor.set(0.5, 0.5);
         const ballS = this.project(snap.ball.x, snap.ball.y);
-        const da =
+        sp.rotation =
           sm > 0.6
             ? Math.atan2(node.diveDir.y, node.diveDir.x)
             : Math.atan2(ballS.y - s.y, ballS.x - s.x);
-        node.body.rotation = da;
-        node.body.position.set(0, -p.z * u);
+        sp.position.set(0, -p.z * u);
         node.shadow.scale.set(1 / (1 + p.z * 0.5));
       } else if (p.state === "slide") {
-        // Sliding tackle: liggend langs de glij-richting, been gestrekt naar voren.
-        this.drawPlayerSlide(node.body, node.look);
-        node.body.rotation = Math.atan2(node.diveDir.y, node.diveDir.x);
-        node.body.position.set(0, 0);
+        // Sliding tackle: liggende pixelsprite langs de glij-richting.
+        sp.texture = getPoseTexture(node.look, "slide");
+        sp.anchor.set(0.5, 0.5);
+        sp.rotation = Math.atan2(node.diveDir.y, node.diveDir.x);
+        sp.position.set(0, 0);
         node.shadow.scale.set(1);
       } else {
-        node.body.rotation = 0;
-        node.body.position.set(0, 0);
+        // Staand/lopend: voet-anchor, geen rotatie.
+        sp.anchor.set(PERSON_ANCHOR_X, PERSON_ANCHOR_Y);
+        sp.rotation = 0;
+        sp.position.set(0, 0);
         node.shadow.scale.set(1);
-        this.drawPerson(node.body, node.look, pf + rot, node.phase, hold);
+        const moving = moved > 0.04;
+        const frame = moving ? (Math.floor(node.phase * 0.5) % 2) + 1 : 0;
+        sp.texture = getPersonTexture(node.look, pf + rot, frame, hold);
         if (hold) heldBall = { x: s.x, y: s.y, face: pf + rot, mode: hold };
       }
 
@@ -897,6 +800,26 @@ export class MatchRenderer {
 
 function hexToNum(hex: string): number {
   return parseInt(hex.replace("#", ""), 16);
+}
+
+/** Waargenomen helderheid (0..1) van een 0xRRGGBB-kleur. */
+function luminance(c: number): number {
+  return (0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255)) / 255;
+}
+
+/** Donkerdere tint van een kleur (factor < 1). */
+function darken(c: number, f: number): number {
+  const r = Math.round(((c >> 16) & 255) * f);
+  const g = Math.round(((c >> 8) & 255) * f);
+  const b = Math.round((c & 255) * f);
+  return (r << 16) | (g << 8) | b;
+}
+
+/** Broekkleur per team: heeft het team een echte tweede kleur (geen wit/licht),
+ *  dan die als broek; anders een donkerder tint van het shirt — zo is geen
+ *  enkel broekje meer standaard wit. */
+function pickShorts(shirt: number, secondary: number): number {
+  return luminance(secondary) < 0.8 ? secondary : darken(shirt, 0.6);
 }
 
 /** Interpoleer een hoek via de kortste weg (geen 360°-flip bij de wrap). */
