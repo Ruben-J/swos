@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite } from "pixi.js";
+import { Application, Container, Graphics, Sprite, Texture, TilingSprite } from "pixi.js";
 import { PITCH, PLAYER, clamp, lerp } from "@pitch/shared";
 import type { CameraView, MatchSnapshot, MatchSnapshotPlayer } from "@pitch/engine";
 import {
@@ -71,6 +71,17 @@ export class MatchRenderer {
   private world = new Container();
   private sprites = new Container();
   private pitchLayer = new Graphics();
+  // Stadion (grasrand + reclameborden + publiekstribunes): statisch, in de
+  // world-laag zodat het mee draait/tilt met het veld. Eenmalig opgebouwd.
+  private stadium = new Container();
+  // Crowd-tegels: hun texture wordt elk frame tegen de veldrotatie in gedraaid
+  // (tileRotation = -rot) zodat de toeschouwers RECHTOP op het scherm staan.
+  private crowdTiles: TilingSprite[] = [];
+  // Beveiliging + fotografen op de asfalt-track: pixel-sprites in de world-laag,
+  // elk frame tegen rot in gedraaid zodat ze rechtop op het scherm staan.
+  private trackFigures: Sprite[] = [];
+  // Cornervlaggen: rechtopstaand in de sprite-laag, elk frame geprojecteerd.
+  private cornerFlags: { g: Graphics; x: number; y: number }[] = [];
   // Doelen: rechtopstaande 3D-kooien in de sprite-laag (één per doellijn, elk
   // met eigen diepte-sortering). Elk frame hertekend i.v.m. net-wobble.
   private goalNear = new Graphics();
@@ -121,6 +132,8 @@ export class MatchRenderer {
     this.app.stage.addChild(this.sprites);
     // Sprites op scherm-y sorteren: wie lager staat (dichterbij) tekent vóór.
     this.sprites.sortableChildren = true;
+    // Stadion achter het veld, daarna het veld zelf eroverheen.
+    this.world.addChild(this.stadium);
     this.world.addChild(this.pitchLayer);
     // Schaduw, richtpijl, bal en de doelkooien leven in de scherm-laag.
     this.ballShadow.zIndex = -1; // altijd op de grond, onder de sprites
@@ -131,8 +144,297 @@ export class MatchRenderer {
     this.sprites.addChild(this.ballShadow);
     this.sprites.addChild(this.aimArrow);
     this.sprites.addChild(this.ball);
+    this.buildStadium();
+    this.buildCornerFlags();
     this.drawPitch();
     this.drawRollingBall(1, 0, 0);
+  }
+
+  /**
+   * Bouw het stadion rond het veld (eenmalig): een donkere grasrand, een ring
+   * van reclameborden, en daarbuiten de publiekstribunes (herhaalbare crowd-
+   * texture). Alles in world-lokale pixels, zodat het mee draait/tilt/zoomt.
+   */
+  private buildStadium(): void {
+    const u = PX_PER_UNIT;
+    const W = PITCH.width * u;
+    const H = PITCH.height * u;
+    this.stadium.removeChildren();
+
+    const apron = 3 * u; // grasrand tussen lijn en boarding
+    const board = 1.6 * u; // diepte van de reclameborden
+    const track = 2.6 * u; // asfalt-perimeter (fotografen/politie) tussen bord en tribune
+    const stand = 34 * u; // diepte van de tribunes
+    const e0 = apron; // boarding binnenrand
+    const e1 = apron + board; // boarding buitenrand / track binnenrand
+    const e2 = e1 + track; // track buitenrand / tribune binnenrand
+    const e3 = e2 + stand; // tribune buitenrand
+
+    // Donkere basis onder alles (alleen de zichtbare stroken blijven over).
+    const base = new Graphics();
+    base.rect(-e3, -e3, W + 2 * e3, H + 2 * e3).fill(0x123f22);
+    this.stadium.addChild(base);
+
+    // Publiekstribunes: thuispubliek rondom (overwegend thuiskleuren), met een
+    // uitvak in de uitclubkleuren. Mensjes ~op veldspeler-formaat.
+    const homeCrowd = this.makeCrowdTexture(
+      hexToNum(this.colors.home.primary),
+      hexToNum(this.colors.home.secondary),
+    );
+    const awayCrowd = this.makeCrowdTexture(
+      hexToNum(this.colors.away.primary),
+      hexToNum(this.colors.away.secondary),
+    );
+    const ts = 1.0; // tegelschaal (toeschouwers ~speler-formaat)
+    this.crowdTiles = [];
+    const addStand = (tex: Texture, x: number, y: number, w: number, h: number): void => {
+      const t = new TilingSprite({ texture: tex, width: w, height: h });
+      t.tileScale.set(ts);
+      t.position.set(x, y);
+      this.stadium.addChild(t);
+      this.crowdTiles.push(t); // tileRotation wordt per frame tegen rot in gezet
+    };
+    addStand(homeCrowd, -e3, -e3, W + 2 * e3, stand); // zijlijn y<0
+    addStand(homeCrowd, -e3, H + e2, W + 2 * e3, stand); // zijlijn y>H
+    addStand(homeCrowd, -e3, -e2, stand, H + 2 * e2); // achter doel x<0
+    addStand(homeCrowd, W + e2, -e2, stand, H + 2 * e2); // achter doel x>W
+    // Uitvak: blok in de tribune achter het x=W-doel, aan de y=H-kant — valt na de
+    // veld-rotatie (1e helft) rechtsboven in beeld.
+    const awayLen = 0.42 * H;
+    const awayY0 = H + e2 - awayLen; // grens tussen uit- en thuisvak
+    addStand(awayCrowd, W + e2, awayY0, stand, awayLen);
+
+    // Tribune-voorwand ("onderkant van de tribune"): een betonnen wand aan de
+    // binnenrand van elke tribune (over de voorste crowd-rijen), met een lichte
+    // reling aan de veldzijde — zo zitten de voorste toeschouwers er bovenop
+    // i.p.v. hard af te kappen.
+    const wall = 2.2 * u;
+    const ew = e2 + wall;
+    const front = new Graphics();
+    const WALL = 0x42454c;
+    const RAIL = 0x6a6e77;
+    front.rect(-ew, -ew, W + 2 * ew, wall).fill(WALL); // boven
+    front.rect(-ew, H + e2, W + 2 * ew, wall).fill(WALL); // onder
+    front.rect(-ew, -e2, wall, H + 2 * e2).fill(WALL); // links
+    front.rect(W + e2, -e2, wall, H + 2 * e2).fill(WALL); // rechts
+    // Reling (lichte rand) aan de veldzijde van elke wand.
+    front.rect(-ew, -e2 - 2, W + 2 * ew, 2).fill(RAIL); // boven
+    front.rect(-ew, H + e2, W + 2 * ew, 2).fill(RAIL); // onder
+    front.rect(-e2 - 2, -e2, 2, H + 2 * e2).fill(RAIL); // links
+    front.rect(W + e2, -e2, 2, H + 2 * e2).fill(RAIL); // rechts
+    this.stadium.addChild(front);
+
+    // Asfalt-perimeter tussen de boarding en de tribunes.
+    const asph = new Graphics();
+    const ASF = 0x3b3e44;
+    asph.rect(-e2, -e2, W + 2 * e2, track).fill(ASF); // y<0
+    asph.rect(-e2, H + e1, W + 2 * e2, track).fill(ASF); // y>H
+    asph.rect(-e2, -e1, track, H + 2 * e1).fill(ASF); // x<0
+    asph.rect(W + e1, -e1, track, H + 2 * e1).fill(ASF); // x>W
+    this.stadium.addChild(asph);
+
+    // Reclameborden: ring van afwisselend gekleurde segmenten net buiten de lijn.
+    const boards = new Graphics();
+    const adCols = [0xe8e8e8, 0xcf2030, 0x1f53b0, 0xf0b020, 0x16a05a];
+    const seg = 7 * u; // breedte van één bord
+    const drawBoardRun = (x0: number, y0: number, horiz: boolean, len: number): void => {
+      let p = 0;
+      let i = 0;
+      while (p < len) {
+        const s = Math.min(seg, len - p);
+        const col = adCols[i % adCols.length]!;
+        if (horiz) boards.rect(x0 + p, y0, s, board).fill(col);
+        else boards.rect(x0, y0 + p, board, s).fill(col);
+        p += s;
+        i++;
+      }
+    };
+    drawBoardRun(-e0, -e1, true, W + 2 * e0); // boven
+    drawBoardRun(-e0, H + e0, true, W + 2 * e0); // onder
+    drawBoardRun(-e1, -e0, false, H + 2 * e0); // links
+    drawBoardRun(W + e0, -e0, false, H + 2 * e0); // rechts
+    this.stadium.addChild(boards);
+
+    // Scheidslijn tussen uit- en thuisvak (donkere balk dwars door de tribune).
+    const divider = new Graphics();
+    divider.rect(W + e2, awayY0 - 0.9, stand, 1.8).fill(0x0e0e0e);
+    this.stadium.addChild(divider);
+
+    // Beveiliging + fotografen als upright pixel-figuren op de asfalt-track.
+    this.trackFigures = [];
+    const polTex = this.makeFigureTexture("police");
+    const camTex = this.makeFigureTexture("camera");
+    const place = (tex: Texture, x: number, y: number): void => {
+      const s = new Sprite(tex);
+      s.anchor.set(0.5, 0.86); // voeten op de track
+      s.scale.set(1.1);
+      s.position.set(x, y);
+      this.stadium.addChild(s);
+      this.trackFigures.push(s); // rotation = -rot per frame -> rechtop
+    };
+    const tMid = (e1 + e2) / 2; // hart van de asfalt-track
+    // Fotografen achter beide doelen.
+    const nP = 8;
+    for (let i = 0; i < nP; i++) {
+      const y = H * (0.16 + (0.68 * i) / (nP - 1));
+      place(camTex, -tMid, y);
+      place(camTex, W + tMid, y);
+    }
+    // Politie langs beide zijlijnen.
+    const nQ = 9;
+    for (let i = 0; i < nQ; i++) {
+      const x = W * (0.08 + (0.84 * i) / (nQ - 1));
+      place(polTex, x, -tMid);
+      place(polTex, x, H + tMid);
+    }
+    // Politie-cluster tussen uit- en thuisvak (op de x>W-track bij de grens).
+    for (let k = -2; k <= 2; k++) place(polTex, W + tMid, awayY0 + k * 4.2);
+  }
+
+  /** Klein upright pixel-figuurtje voor de track: een steward/agent (geel hesje)
+   *  of een fotograaf (camera tegen het gezicht). SWOS-achtig blokkerig. */
+  private makeFigureTexture(kind: "police" | "camera"): Texture {
+    const W = 11;
+    const H = 15;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    const px = (x: number, y: number, w: number, h: number, c: string): void => {
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, w, h);
+    };
+    const OUT = "#101012";
+    if (kind === "police") {
+      px(2, 5, 7, 10, OUT); // outline lijf
+      px(3, 11, 2, 3, "#1a1f33"); // benen
+      px(6, 11, 2, 3, "#1a1f33");
+      px(3, 5, 5, 6, "#f2cf1c"); // geel hesje
+      px(3, 8, 5, 1, "#caa800"); // hesje-schaduwlijn
+      px(2, 6, 1, 4, "#1a2a55"); // armen (mouwen)
+      px(8, 6, 1, 4, "#1a2a55");
+      px(3, 1, 5, 5, OUT); // outline hoofd
+      px(4, 2, 3, 3, "#e6b48c"); // gezicht
+      px(3, 0, 5, 2, "#16204a"); // politiepet
+    } else {
+      px(2, 5, 7, 10, OUT); // outline lijf
+      px(3, 11, 2, 3, "#23262c"); // benen
+      px(6, 11, 2, 3, "#23262c");
+      px(3, 6, 5, 6, "#33373f"); // donkere jas
+      px(2, 7, 1, 4, "#33373f"); // armen omhoog naar de camera
+      px(8, 7, 1, 4, "#33373f");
+      px(4, 3, 3, 3, "#e6b48c"); // hoofd
+      px(2, 2, 7, 4, OUT); // camera-outline (voor het gezicht gehouden)
+      px(3, 3, 5, 2, "#0c0c0c"); // camera-body
+      px(7, 3, 2, 2, "#3a3d42"); // lens-tube
+      px(4, 3, 2, 2, "#bfe0ff"); // lens-glans
+    }
+    const tex = Texture.from(canvas);
+    tex.source.scaleMode = "nearest";
+    return tex;
+  }
+
+  /** Genereer een herhaalbare publiek-texture: rijen GROTE toeschouwers (~speler-
+   *  formaat) die naar het veld kijken — hoofd, lijf in teamkleur, vaak een
+   *  sjaal, soms opgestoken armen of een zwaaiende vlag. `primary` zaait ook de
+   *  variatie zodat thuis/uit verschillen. De texture wordt in de renderer tegen
+   *  de veldrotatie in gedraaid zodat de mensen rechtop staan. */
+  private makeCrowdTexture(primary: number, secondary: number): Texture {
+    const cols = 8;
+    const rows = 9;
+    const cw = 14; // celbreedte
+    const ch = 10; // celhoogte < lijfhoogte -> rijen schuiven áchter elkaar (getrapt)
+    const T_W = cols * cw;
+    const T_H = rows * ch;
+    const canvas = document.createElement("canvas");
+    canvas.width = T_W;
+    canvas.height = T_H;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#15181d"; // donkere tribune-achtergrond
+    ctx.fillRect(0, 0, T_W, T_H);
+    let seed = (primary ^ 0x9e3779b1) >>> 0;
+    const rnd = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const hx = (c: number): string => `#${(c & 0xffffff).toString(16).padStart(6, "0")}`;
+    const px = (x: number, y: number, w: number, h: number, c: string): void => {
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, w, h);
+    };
+    // Lijf-/sjaalkleuren: overwegend de teamkleuren, met wat neutrale variatie.
+    const team = hx(primary);
+    const team2 = hx(secondary);
+    const bodies = [team, team, team, team, team2, team2, "#2b2b2b", "#cfcfcf", "#2a4a8a"];
+    const skins = ["#f0c79c", "#d9a877", "#b07c4e", "#8a5a32"];
+    const hairs = ["#241810", "#0e0e0e", "#5a3a1a", "#7a5a36", "#b9b9b9"];
+
+    // Achterste rijen eerst (vóór-rijen overlappen ze -> diepte).
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = c * cw + 1 + ((rnd() * 2) | 0);
+        const top = r * ch + 1;
+        const body = bodies[(rnd() * bodies.length) | 0]!;
+        const skin = skins[(rnd() * skins.length) | 0]!;
+        const hair = hairs[(rnd() * hairs.length) | 0]!;
+        const armsUp = rnd() < 0.32;
+        const scarf = rnd() < 0.4;
+        const flag = rnd() < 0.07;
+        // Romp (schouders + bovenlijf), naar de kijker/het veld toe.
+        px(cx, top + 6, 12, 8, body);
+        px(cx, top + 6, 12, 1, "rgba(255,255,255,0.12)"); // schouder-highlight
+        // Sjaal: gekleurde band onder de hals (vaak in de andere teamkleur).
+        if (scarf) px(cx, top + 6, 12, 2, rnd() < 0.5 ? team2 : team);
+        // Hoofd: haar + gezicht.
+        px(cx + 3, top, 6, 4, hair);
+        px(cx + 4, top + 3, 4, 3, skin);
+        // Armen: opgestoken (juichend) of langs het lijf.
+        if (armsUp) {
+          px(cx, top + 1, 2, 6, skin); // linkerarm omhoog
+          px(cx + 10, top + 1, 2, 6, skin); // rechterarm omhoog
+          if (scarf) px(cx, top, 12, 2, rnd() < 0.5 ? team : team2); // sjaal omhoog gehouden
+        } else {
+          px(cx, top + 7, 2, 5, skin); // armen langs het lijf
+          px(cx + 10, top + 7, 2, 5, skin);
+        }
+        // Vlag: paal + wapperend doek boven het hoofd.
+        if (flag) {
+          px(cx + 9, top - 7, 1, 9, "#caa46a");
+          px(cx + 10, top - 7, 6, 4, rnd() < 0.5 ? team : team2);
+        }
+      }
+    }
+    const tex = Texture.from(canvas);
+    tex.source.scaleMode = "nearest";
+    tex.source.addressMode = "repeat";
+    return tex;
+  }
+
+  /** Maak vier cornervlaggen (paal + driehoekvlag) in de sprite-laag. */
+  private buildCornerFlags(): void {
+    const W = PITCH.width;
+    const H = PITCH.height;
+    const dark = 0x121212;
+    for (const [x, y] of [[0, 0], [W, 0], [0, H], [W, H]] as const) {
+      const g = new Graphics();
+      // Blokkerige (pixel-art) cornervlag: paal recht omhoog vanaf de hoek
+      // (scherm-omhoog = -y) met een getrapt geel-rood vaantje aan de top.
+      const px = (rx: number, ry: number, w: number, h: number, c: number): void => {
+        g.rect(rx, ry, w, h).fill(c);
+      };
+      px(-1.4, -15, 2.6, 15, dark); // paal-outline
+      px(-0.8, -15, 1.4, 14, 0xcfcfcf); // paal
+      // Vaantje: donkere outline + gestapelde rijen (blokpixels), geel/rood.
+      px(0.6, -16, 8.4, 7, dark);
+      px(0.6, -15, 7, 1.4, 0xf2c01e);
+      px(0.6, -13.6, 6, 1.4, 0xd8392a);
+      px(0.6, -12.2, 4.6, 1.4, 0xf2c01e);
+      px(0.6, -10.8, 3, 1.4, 0xd8392a);
+      this.sprites.addChild(g);
+      this.cornerFlags.push({ g, x, y });
+    }
   }
 
   /**
@@ -597,6 +899,9 @@ export class MatchRenderer {
     const scaleY = view.zoom;
     this.world.rotation = rot;
     this.world.scale.set(scaleX, scaleY);
+    // Crowd-texture + track-figuren tegen de veldrotatie in draaien -> rechtop.
+    for (const t of this.crowdTiles) t.tileRotation = -rot;
+    for (const s of this.trackFigures) s.rotation = -rot;
     const vx = view.center.x * u * scaleX;
     const vy = view.center.y * u * scaleY;
     this.world.position.set(
@@ -623,6 +928,13 @@ export class MatchRenderer {
     this.drawNets(snap);
     // Cosmetische scheids + grensrechters.
     this.updateOfficials(snap, view.zoom);
+    // Cornervlaggen: rechtopstaand op de geprojecteerde hoekpunten.
+    for (const f of this.cornerFlags) {
+      const s = this.project(f.x, f.y);
+      f.g.position.set(s.x, s.y);
+      f.g.scale.set(view.zoom);
+      f.g.zIndex = s.y;
+    }
 
     const prev = this.prev;
     const prevById = new Map(prev?.players.map((p) => [p.id, p]));
