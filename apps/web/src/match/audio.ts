@@ -115,7 +115,7 @@ export class MatchAudio {
     this.crowdSrc = src;
     const t = this.ctx.currentTime;
     this.crowdGain.gain.setValueAtTime(0.0001, t);
-    this.crowdGain.gain.linearRampToValueAtTime(0.25, t + 1.5);
+    this.crowdGain.gain.linearRampToValueAtTime(0.24, t + 1.5);
   }
 
   /** 0..1 publieksintensiteit: bal dichter bij een doel = luider/meer rumoer. */
@@ -125,7 +125,8 @@ export class MatchAudio {
     if (Math.abs(v - this.lastIntensity) < 0.04) return; // throttle de automation
     this.lastIntensity = v;
     const t = this.ctx.currentTime;
-    this.crowdGain.gain.setTargetAtTime(0.22 + v * 0.33, t, 0.5);
+    // Basis (middenveld) al duidelijk hoorbaar, kleinere zwelling naar het doel.
+    this.crowdGain.gain.setTargetAtTime(0.24 + v * 0.16, t, 0.5);
   }
 
   /** Gejuich bij een doelpunt (opbouw -> piek), met een tijdelijke bed-duck. */
@@ -152,7 +153,7 @@ export class MatchAudio {
     // Bed even terugnemen zodat het gejuich bovenligt, dan herstellen.
     if (this.crowdGain) {
       this.crowdGain.gain.cancelScheduledValues(t);
-      this.crowdGain.gain.setTargetAtTime(0.12, t, 0.4);
+      this.crowdGain.gain.setTargetAtTime(0.06, t, 0.4);
       this.lastIntensity = -1;
     }
   }
