@@ -137,26 +137,34 @@ export class MatchAudio {
     o.stop(t + 0.1);
   }
 
-  /** Scheidsrechtersfluit: twee licht ontstemde tonen met trilling. */
+  /** Scheidsrechtersfluit: twee licht ontstemde tonen met lichte trilling, een
+   *  vleugje "lucht" en een low-pass — warmer/zachter i.p.v. schel. */
   whistle(long = false): void {
     if (!this.ctx || !this.master) return;
     this.ensureRunning();
     const t = this.ctx.currentTime;
-    const dur = long ? 0.6 : 0.2;
+    const dur = long ? 0.55 : 0.2;
+    // Zachtere envelope (langere aanzet -> geen klik) + lager volume.
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
-    g.gain.setValueAtTime(0.22, t + dur - 0.05);
+    g.gain.exponentialRampToValueAtTime(0.13, t + 0.05);
+    g.gain.setValueAtTime(0.13, t + Math.max(0.06, dur - 0.08));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    g.connect(this.master);
-    for (const f of [2900, 2930]) {
+    // Low-pass haalt de scherpte van de boventonen af.
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 3000;
+    lp.Q.value = 0.4;
+    g.connect(lp).connect(this.master);
+    // Lagere grondtoon (minder schel), twee licht ontstemde sinussen.
+    for (const f of [2250, 2275]) {
       const o = this.ctx.createOscillator();
       o.type = "sine";
       o.frequency.value = f;
       const lfo = this.ctx.createOscillator();
-      lfo.frequency.value = long ? 20 : 28;
+      lfo.frequency.value = long ? 15 : 20;
       const lfoG = this.ctx.createGain();
-      lfoG.gain.value = 55;
+      lfoG.gain.value = 32; // minder vibrato-uitslag
       lfo.connect(lfoG).connect(o.frequency);
       o.connect(g);
       o.start(t);
@@ -164,6 +172,20 @@ export class MatchAudio {
       lfo.start(t);
       lfo.stop(t + dur + 0.02);
     }
+    // Vleugje "lucht" (de erwt) maakt de toon minder puur en zachter.
+    const air = this.ctx.createBufferSource();
+    air.buffer = this.makeNoiseBuffer(dur + 0.05);
+    const ab = this.ctx.createBiquadFilter();
+    ab.type = "bandpass";
+    ab.frequency.value = 2200;
+    ab.Q.value = 1.4;
+    const ag = this.ctx.createGain();
+    ag.gain.setValueAtTime(0.0001, t);
+    ag.gain.exponentialRampToValueAtTime(0.028, t + 0.05);
+    ag.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    air.connect(ab).connect(ag).connect(this.master);
+    air.start(t);
+    air.stop(t + dur + 0.03);
   }
 
   dispose(): void {
