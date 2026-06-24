@@ -758,17 +758,34 @@ function keeperCommand(
   // dichtbij) en rol/pass 'm laag in, zodat de tegenpartij 'm niet meteen afpakt.
   // Is er niemand vrij, dan een klare hoge bal naar voren.
   if (ball.ownerId === gk.id) {
+    const opps = players.filter((o) => o.side !== gk.side);
+    // Kan een tegenstander de pass-LIJN onderscheppen? Tegenstander die loodrecht
+    // dicht bij het segment gk->ontvanger staat (en er echt tussen, niet erachter)
+    // blokkeert de lijn -> dan niet inspelen.
+    const laneClear = (to: Vec2): boolean => {
+      const ax = to.x - gk.pos.x;
+      const ay = to.y - gk.pos.y;
+      const segLen2 = ax * ax + ay * ay;
+      if (segLen2 < 1e-6) return true;
+      for (const o of opps) {
+        let t = ((o.pos.x - gk.pos.x) * ax + (o.pos.y - gk.pos.y) * ay) / segLen2;
+        if (t <= 0.08 || t >= 0.98) continue; // achter de keeper of voorbij de ontvanger
+        const cx = gk.pos.x + ax * t;
+        const cy = gk.pos.y + ay * t;
+        if (Math.hypot(o.pos.x - cx, o.pos.y - cy) < 2.8) return false; // staat ertussen
+      }
+      return true;
+    };
     let best: PlayerEntity | null = null;
     let bestScore = -Infinity;
     for (const mate of players) {
       if (mate.id === gk.id || mate.side !== gk.side) continue;
       let nearOpp = Infinity;
-      for (const o of players) {
-        if (o.side !== gk.side) nearOpp = Math.min(nearOpp, dist(o.pos, mate.pos));
-      }
+      for (const o of opps) nearOpp = Math.min(nearOpp, dist(o.pos, mate.pos));
       if (nearOpp < 6) continue; // gedekt -> niet inspelen
       const d = dist(gk.pos, mate.pos);
       if (d > 45) continue; // te ver voor een gerichte, lage uitworp/pass
+      if (!laneClear(mate.pos)) continue; // tegenstander kan ertussen komen
       const score = Math.min(nearOpp, 14) - Math.abs(d - 18) * 0.2; // ruim + op afstand
       if (score > bestScore) {
         bestScore = score;
@@ -779,7 +796,8 @@ function keeperCommand(
       const d = dist(gk.pos, best.pos);
       cmd.kick = { dir: dirTo(gk, best.pos), power: clamp(10 + d * 0.45, 12, 28), loft: 0, curve: 0, targetId: best.id };
     } else {
-      cmd.kick = { dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }), power: 32, loft: 7, curve: 0 };
+      // Niemand vrij én vrije lijn -> verre trap naar voren (boombal downfield).
+      cmd.kick = { dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }), power: 34, loft: 8, curve: 0 };
     }
     return cmd;
   }

@@ -569,4 +569,54 @@ describe("MatchSim", () => {
     expect(maxZAfterLanding).toBeLessThan(0.05); // blijft op de grond na de landing
     expect(["idle", "run"]).toContain(gk.state); // hersteld -> weer normaal
   });
+
+  it("sliding pal langs een tegenstander is GEEN overtreding", () => {
+    const sim = new MatchSim(makeConfig(11));
+    sim.phase = "play";
+    // Parkeer iedereen ver weg zodat alleen de twee opgestelde spelers tellen.
+    for (const p of sim.players) p.pos = { x: 95, y: 64 };
+    sim.ball.pos = { x: 20, y: 20 }; // bal ver weg -> geen balcontact
+    sim.ball.vel = { x: 0, y: 0 };
+    sim.ball.ownerId = null;
+
+    const slider = sim.players.find((p) => p.side === "home" && !p.isKeeper)!;
+    const victim = sim.players.find((p) => p.side === "away" && !p.isKeeper)!;
+    slider.pos = { x: 50, y: 34 };
+    slider.vel = { x: 12, y: 0 }; // glijdt naar +x
+    slider.state = "slide";
+    slider.stateTimer = 0.5;
+    slider.slideTouched = false;
+    // Tegenstander 2 units OPZIJ van de glij-baan (voetpunt mist hem).
+    victim.pos = { x: 51.1, y: 36.3 };
+    victim.state = "idle";
+
+    sim.step(TICK_DT, emptyIntent());
+    expect(sim.snapshot().phase).toBe("play"); // geen fluit
+    expect(victim.state).not.toBe("tumble"); // hij valt niet
+  });
+
+  it("sliding ín een tegenstander is een overtreding en die speler valt", () => {
+    const sim = new MatchSim(makeConfig(11));
+    sim.phase = "play";
+    for (const p of sim.players) p.pos = { x: 95, y: 64 };
+    sim.ball.pos = { x: 20, y: 20 };
+    sim.ball.vel = { x: 0, y: 0 };
+    sim.ball.ownerId = null;
+
+    const slider = sim.players.find((p) => p.side === "home" && !p.isKeeper)!;
+    const victim = sim.players.find((p) => p.side === "away" && !p.isKeeper)!;
+    slider.pos = { x: 50, y: 34 };
+    slider.vel = { x: 12, y: 0 };
+    slider.state = "slide";
+    slider.stateTimer = 0.5;
+    slider.slideTouched = false;
+    // Tegenstander recht in de glij-baan: het voetpunt raakt zijn lijf.
+    victim.pos = { x: 51.2, y: 34 };
+    victim.state = "idle";
+
+    sim.step(TICK_DT, emptyIntent());
+    expect(victim.state).toBe("tumble"); // omvergelopen -> valt
+    // De overtreding levert een hervatting op (fluit-fase ingezet).
+    expect(["whistle", "deadball"]).toContain(sim.snapshot().phase);
+  });
 });

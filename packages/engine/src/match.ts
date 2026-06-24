@@ -47,6 +47,7 @@ const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de herva
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const KEEPER_DIVE_VZ = 6; // verticale impuls (units/s) waarmee een keeperduik de lucht in springt
 const KEEPER_RECOVER = 0.7; // s die de keeper nodig heeft om na een duik weer overeind te komen
+const TUMBLE_TIME = 0.85; // s dat een omvergelopen speler tuimelt/ligt na een overtreding
 const GOAL_CELEBRATION = 5.0; // s dat een doelpunt-viering duurt vóór de aftrap
 const BOARDING_DIST = 3; // units buiten de lijn waar de reclameborden staan
 const BOARDING_HEIGHT = 1.5; // bal hoger dan dit vliegt over de boarding heen
@@ -627,10 +628,12 @@ export class MatchSim {
               targetId: tId,
             };
           } else {
-            const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir), Math.PI * 0.6, 38);
+            // X = een STRAKKE, harde pass naar de teamgenoot waar je naar wijst
+            // (smalle kegel zodat de richting telt). Komt vlot aan, geen slome rol.
+            const mate = nearestTeammateInCone(this.players, p, aimAngle(aimDir), Math.PI * 0.45, 55, 30);
             const dir = mate ? dirTo(p, mate.pos) : aimDir;
-            const d = mate ? dist(p.pos, mate.pos) : 14;
-            cmd.kick = { dir, power: clamp(8 + d * 0.4, 10, 17), loft: 0, curve: 0, targetId: mate?.id ?? null };
+            const d = mate ? dist(p.pos, mate.pos) : 16;
+            cmd.kick = { dir, power: clamp(19 + d * 0.55, 20, 36), loft: 0, curve: 0, targetId: mate?.id ?? null };
           }
         } else if (shoot) {
           // Een schot is ALTIJD zo hard als deze speler kan (op basis van zijn
@@ -760,6 +763,23 @@ export class MatchSim {
       if (p.z <= 0) p.vz = 0;
       p.stateTimer = Math.max(0, p.stateTimer - dt);
       return;
+    }
+
+    // Omvergelopen door een overtreding: de speler tuimelt en blijft even liggen
+    // (geen controle, geen input) tot hij weer opkrabbelt. Tijdens een tackle
+    // raakt deze speler niemand en pakt hij niets — hij is uitgeschakeld.
+    if (p.state === "tumble") {
+      if (p.stateTimer > 0) {
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+        p.vel.x *= Math.max(0, 1 - dt * 5); // tuimelt uit
+        p.vel.y *= Math.max(0, 1 - dt * 5);
+        p.pos.x = clamp(p.pos.x, -PLAYER_OOB, PITCH.width + PLAYER_OOB);
+        p.pos.y = clamp(p.pos.y, -PLAYER_OOB, PITCH.height + PLAYER_OOB);
+        p.stateTimer = Math.max(0, p.stateTimer - dt);
+        return;
+      }
+      p.state = "idle"; // weer overeind
     }
 
     // Sliding tackle is een COMMITMENT: eenmaal ingezet glijdt de speler
@@ -910,12 +930,27 @@ export class MatchSim {
       }
       return;
     }
-    // Contact-afstand ~ twee lijven die elkaar raken + het gestrekte glij-been.
-    const contact = PLAYER.radius * 2 + 0.25;
+    // "Punt van de voet": het gestrekte glij-been reikt VÓÓR het zwaartepunt uit
+    // in de glij-richting. Alleen als dat puntje het lijf van een tegenstander
+    // raakt is het een overtreding — pal langs iemand heen glijden (lijf opzij,
+    // niet in de baan) is dus géén fout meer.
+    const dir =
+      len(p.vel) > 0.1
+        ? normalize(p.vel)
+        : { x: Math.cos(p.facing), y: Math.sin(p.facing) };
+    const reach = PLAYER.radius + 0.5; // voetpunt vóór het zwaartepunt
+    const foot = { x: p.pos.x + dir.x * reach, y: p.pos.y + dir.y * reach };
+    const hitR = PLAYER.radius + 0.15; // lijf-straal van de tegenstander
     for (const o of this.players) {
       if (o.side === p.side) continue;
-      if (dist(o.pos, p.pos) < contact) {
+      if (dist(foot, o.pos) < hitR) {
         p.slideTouched = true;
+        // De omvergelopen speler VALT: korte tuimeling, weg van de tackelaar én
+        // mee in de glij-richting, daarna blijft hij even liggen.
+        const away = normalize({ x: o.pos.x - p.pos.x, y: o.pos.y - p.pos.y });
+        o.state = "tumble";
+        o.stateTimer = TUMBLE_TIME;
+        o.vel = { x: away.x * 3 + dir.x * 2.5, y: away.y * 3 + dir.y * 2.5 };
         this.pendingFoul = { spot: { ...o.pos }, side: o.side };
         return;
       }

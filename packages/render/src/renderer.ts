@@ -1152,8 +1152,9 @@ export class MatchRenderer {
             : Math.atan2(ballS.y - s.y, ballS.x - s.x);
         sp.position.set(0, -p.z * u);
         node.shadow.scale.set(1 / (1 + p.z * 0.5));
-      } else if (p.state === "slide") {
-        // Sliding tackle: liggende pixelsprite langs de glij-richting.
+      } else if (p.state === "slide" || p.state === "tumble") {
+        // Sliding tackle of omvergelopen speler: liggende pixelsprite langs de
+        // glij-/tuimelrichting.
         sp.texture = getPoseTexture(node.look, "slide");
         sp.anchor.set(0.5, 0.5);
         sp.rotation = Math.atan2(node.diveDir.y, node.diveDir.x);

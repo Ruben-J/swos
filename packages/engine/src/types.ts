@@ -30,7 +30,8 @@ export type PlayerActState =
   | "header"
   | "recover"
   | "dive"
-  | "celebrate";
+  | "celebrate"
+  | "tumble";
 
 export interface PlayerEntity {
   id: string;
