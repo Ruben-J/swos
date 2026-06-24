@@ -112,6 +112,8 @@ export interface MatchSnapshot {
   goals: GoalEvent[];
   /** Laatste bal-in-het-doel (voor de net-animatie); seq stijgt per doelpunt. */
   goalImpact: GoalImpact | null;
+  /** Loopt op bij elke keeperredding op een schot (voor audio "oooh"). */
+  saveSeq: number;
 }
 
 export interface GoalEvent {
@@ -156,6 +158,8 @@ export class MatchSim {
   private goals: GoalEvent[] = [];
   private goalImpact: GoalImpact | null = null;
   private goalImpactSeq = 0;
+  /** Loopt op bij elke keeperredding op een schot richting doel (voor audio). */
+  private saveSeq = 0;
 
   private humanSide: Side | null;
   activeId: Record<Side, string | null> = { home: null, away: null };
@@ -1462,6 +1466,9 @@ export class MatchSim {
       const canHold = stretch < 0.9;
       const heldCleanly = easy || (canHold && this.ball.z < 2.4 && this.rng.chance(catchProb));
 
+      // Signaleer een echte REDDING (op een schot richting doel) voor o.a. audio.
+      if (towardGoal && speed > 13) this.saveSeq++;
+
       if (heldCleanly) {
         // Klemvast.
         this.ball.ownerId = p.id;
@@ -2260,6 +2267,7 @@ export class MatchSim {
           : null,
       goals: this.goals.map((g) => ({ ...g })),
       goalImpact: this.goalImpact ? { ...this.goalImpact } : null,
+      saveSeq: this.saveSeq,
     };
   }
 }

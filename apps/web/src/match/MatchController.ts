@@ -9,6 +9,7 @@ import {
 } from "@pitch/engine";
 import { MatchRenderer } from "@pitch/render";
 import { PITCH } from "@pitch/shared";
+import { MatchAudio } from "./audio.js";
 
 export type HudListener = (snap: MatchSnapshot) => void;
 
@@ -29,6 +30,12 @@ export class MatchController {
   private input: KeyboardInput;
   private hudListener: HudListener | null = null;
   private hudAccumulator = 0;
+  private audio: MatchAudio | null = null;
+  // Vorige waarden voor event-detectie (goal/redding/fluit/balcontact).
+  private prevGoalSeq = 0;
+  private prevSaveSeq = 0;
+  private prevPhase = "";
+  private prevBallSpeed = 0;
 
   private constructor(sim: MatchSim, camera: Camera, input: KeyboardInput) {
     this.sim = sim;
@@ -55,6 +62,8 @@ export class MatchController {
       away: { primary: config.away.colorPrimary, secondary: config.away.colorSecondary, pattern: config.away.pattern },
     });
     controller.fitCamera();
+    controller.audio = new MatchAudio();
+    controller.audio.start();
     input.attach();
     if (import.meta.env.DEV) {
       (window as unknown as { __match?: MatchController }).__match = controller;
@@ -133,7 +142,44 @@ export class MatchController {
   private onRender(alpha: number): void {
     if (!this.renderer) return;
     this.fitCamera();
-    this.renderer.render(this.camera.view(), this.sim.snapshot(), alpha);
+    const snap = this.sim.snapshot();
+    this.updateAudio(snap);
+    this.renderer.render(this.camera.view(), snap, alpha);
+  }
+
+  /** Vertaal sim-events naar geluid: goal-gejuich, redding-"oooh", fluit,
+   *  balcontact en de publieksintensiteit op basis van de bal bij het doel. */
+  private updateAudio(snap: MatchSnapshot): void {
+    const a = this.audio;
+    if (!a) return;
+
+    // Doelpunt -> gejuich (+ fluit).
+    if (snap.goalImpact && snap.goalImpact.seq !== this.prevGoalSeq) {
+      this.prevGoalSeq = snap.goalImpact.seq;
+      a.whistle(false);
+      a.cheer();
+    }
+    // Keeperredding op een schot -> "oooh".
+    if (snap.saveSeq !== this.prevSaveSeq) {
+      this.prevSaveSeq = snap.saveSeq;
+      a.ooh();
+    }
+    // Fasewissel -> fluit (overtreding/uit kort, rust/einde lang).
+    if (snap.phase !== this.prevPhase) {
+      if (snap.phase === "whistle") a.whistle(false);
+      else if (snap.phase === "halftime" || snap.phase === "fulltime") a.whistle(true);
+      this.prevPhase = snap.phase;
+    }
+    // Balcontact: een trap/pass zet de balsnelheid plots omhoog.
+    const v = this.sim.ball.vel;
+    const speed = Math.hypot(v.x, v.y);
+    if (speed - this.prevBallSpeed > 6 && speed > 8) {
+      a.kick(Math.min(1, (speed - 8) / 28));
+    }
+    this.prevBallSpeed = speed;
+    // Publieksintensiteit: hoe dichter de bal bij een doellijn, hoe meer rumoer.
+    const distGoal = Math.min(snap.ball.x, PITCH.width - snap.ball.x);
+    a.setIntensity(1 - Math.min(1, distGoal / 35));
   }
 
   start(): void {
@@ -147,6 +193,8 @@ export class MatchController {
   destroy(): void {
     this.loop.stop();
     this.input.detach();
+    this.audio?.dispose();
+    this.audio = null;
     this.renderer?.destroy();
     this.renderer = null;
   }
