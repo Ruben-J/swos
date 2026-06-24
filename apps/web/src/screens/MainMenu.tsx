@@ -153,18 +153,11 @@ export function MainMenu({ onQuickMatch, onCareer, onLoadCareer, onContinue }: P
 
       <div className={`menu-center${summary ? "" : " solo"}`}>
         <div className="menu-left">
-          <div className="menu-badge">
-            <span />
-            <span>Manager · seizoen 2025/26</span>
-          </div>
-
           <h1>
             PITCH
             <br />
             <span className="lime">LEGEND</span>
           </h1>
-
-          <p className="tagline">Bouw een dynastie. Eén wedstrijd per keer.</p>
 
           <div className="menu-buttons">
             {items.map((m) => (

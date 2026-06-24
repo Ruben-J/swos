@@ -35,6 +35,15 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
     }
   }, [snap, onFinish]);
 
+  // De wedstrijd verlaten kan met Escape (er is geen zichtbare terugknop meer).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onExit();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onExit]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -110,12 +119,6 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
         />
 
         {snap && snap.phase !== "walkout" && <Radar snap={snap} config={config} />}
-
-        <div className="match-topbar">
-          <button className="btn" onClick={onExit}>
-            Terug
-          </button>
-        </div>
       </div>
     </div>
   );
