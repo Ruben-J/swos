@@ -125,8 +125,8 @@ export class MatchAudio {
     if (Math.abs(v - this.lastIntensity) < 0.04) return; // throttle de automation
     this.lastIntensity = v;
     const t = this.ctx.currentTime;
-    // Stevig hoorbaar bed; gentere zwelling naar het doel.
-    this.crowdGain.gain.setTargetAtTime(0.5 + v * 0.14, t, 0.5);
+    // Stevig hoorbaar bed; duidelijke zwelling naar het doel.
+    this.crowdGain.gain.setTargetAtTime(0.5 + v * 0.3, t, 0.5);
   }
 
   /** Gejuich bij een doelpunt (opbouw -> piek), met een tijdelijke bed-duck. */
@@ -138,7 +138,7 @@ export class MatchAudio {
     }
     this.ensureRunning();
     const t = this.ctx.currentTime;
-    const offset = 1.0; // sla de stilste opbouw over -> piek valt ~1.5s later
+    const offset = 2.0; // begin pal op de piek (eerste seconde opbouw eraf)
     const dur = 7.5;
     // Speelt TEGELIJK met het stadion-bed (geen duck): het gejuich ligt er als
     // extra laag bovenop, op een bescheiden niveau zodat het niet overheerst.
