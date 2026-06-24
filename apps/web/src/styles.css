@@ -1763,6 +1763,27 @@ kbd {
 .cd-tab:hover { border-color: var(--accent); }
 .cd-tab.sel { border-color: var(--accent); background: #15241a; }
 .cd-tab-meta { font-size: 0.75rem; color: var(--muted); }
+.cd-scope { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+.cd-scope-btn {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #1a2117;
+  background: #10140e;
+  color: var(--muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.cd-scope-btn:hover { border-color: var(--accent); }
+.cd-scope-btn.sel { border-color: var(--accent); background: #15241a; color: var(--text); }
+.cd-allcountries { display: flex; flex-direction: column; gap: 0.7rem; max-height: 62vh; overflow-y: auto; }
+.cd-country-h {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-2);
+  margin-bottom: 0.3rem;
+}
 .cd-standings { width: 100%; border-collapse: collapse; margin-bottom: 0.8rem; }
 .cd-standings th, .cd-standings td {
   padding: 0.25rem 0.4rem;

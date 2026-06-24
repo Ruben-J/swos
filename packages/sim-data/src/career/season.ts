@@ -203,6 +203,69 @@ export function applyResult(
   };
 }
 
+// Positie-gewichten: wie maakt de goals (spitsen/vleugels), wie geeft de assists.
+const POS_SCORE_WEIGHT: Record<Position, number> = {
+  GK: 0.01, RB: 0.25, LB: 0.25, CB: 0.4, DM: 0.55, CM: 0.95, AM: 1.6, RW: 1.7, LW: 1.7, ST: 2.7,
+};
+const POS_ASSIST_WEIGHT: Record<Position, number> = {
+  GK: 0.02, RB: 0.7, LB: 0.7, CB: 0.35, DM: 0.85, CM: 1.45, AM: 1.9, RW: 1.8, LW: 1.8, ST: 1.0,
+};
+
+function posWeight(p: Player, table: Record<Position, number>): number {
+  return table[p.preferredPositions[0] ?? "CM"];
+}
+
+/** Gewogen keuze uit een niet-lege lijst (deterministisch via de Rng). */
+function pickWeighted(rng: Rng, items: Player[], weight: (p: Player) => number): Player | null {
+  let total = 0;
+  for (const it of items) total += Math.max(0, weight(it));
+  if (total <= 0) return items[0] ?? null;
+  let r = rng.next() * total;
+  for (const it of items) {
+    r -= Math.max(0, weight(it));
+    if (r <= 0) return it;
+  }
+  return items[items.length - 1] ?? null;
+}
+
+/**
+ * Ken de doelpunten van een gespeelde wedstrijd toe aan spelers, zodat er een
+ * topscorers-/assistlijst per seizoen ontstaat. Goedkoop: een paar gewogen
+ * trekkingen per goal (op finishing/positie), met ~65% kans op een assist van
+ * een teamgenoot. Geldt voor álle wedstrijden (ook gesimuleerde competities).
+ */
+function attributeScorers(rng: Rng, save: CareerSave, match: Match): void {
+  const players = save.worldState.players;
+  const scorers: UUID[] = [];
+  const assists: UUID[] = [];
+  const attribute = (teamId: UUID, goals: number): void => {
+    const squad = players.filter((p) => p.teamId === teamId);
+    if (squad.length === 0) return;
+    for (let g = 0; g < goals; g++) {
+      const scorer = pickWeighted(
+        rng,
+        squad,
+        (p) => posWeight(p, POS_SCORE_WEIGHT) * (0.5 + (p.attributes.finishing + p.attributes.shooting) / 200),
+      );
+      if (!scorer) continue;
+      scorers.push(scorer.id);
+      if (rng.chance(0.65)) {
+        const mates = squad.filter((p) => p.id !== scorer.id);
+        const assister = pickWeighted(
+          rng,
+          mates,
+          (p) => posWeight(p, POS_ASSIST_WEIGHT) * (0.5 + (p.attributes.passing + p.attributes.flair) / 200),
+        );
+        if (assister) assists.push(assister.id);
+      }
+    }
+  };
+  attribute(match.homeTeamId, match.score.home);
+  attribute(match.awayTeamId, match.score.away);
+  match.goalScorers = scorers;
+  match.goalAssists = assists;
+}
+
 /** Quicksim één wedstrijd uit aanval/verdediging-sterktes (met speelstijl-tilt). */
 export function simulateMatch(
   rng: Rng,
@@ -250,6 +313,8 @@ function simulateDate(
       else if (myTilt && m.awayTeamId === myId) tilt = { homeAtt: myTilt.opp, awayAtt: myTilt.own };
       simulateMatch(rng, strengths, m, tilt);
     }
+    // Doelpuntenmakers/assists toekennen voor de topscorerslijst.
+    attributeScorers(rng, save, m);
   }
   // Knockout-rondes: beslis gelijke duels (pens) en loot volgende rondes.
   processKnockouts(save, rng);

@@ -1111,8 +1111,33 @@ function CompetitionsView({ save }: { save: CareerSave }) {
     return mine.sort((a, b) => order(a) - order(b));
   }, [ws.competitions, ws.activeSeasonId, myId]);
 
+  // Alle competitie-divisies (ook waar ik niet in zit), gegroepeerd per land —
+  // zo kun je doorklikken hoe het er elders voor staat.
+  const otherLeaguesByCountry = useMemo(() => {
+    const div = (cid: UUID | null): (typeof ws.divisions)[number] | undefined =>
+      ws.divisions.find((d) => d.id === cid);
+    const leagues = ws.competitions
+      .filter((c) => c.seasonId === ws.activeSeasonId && c.format === "league")
+      .sort(
+        (a, b) =>
+          (div(a.divisionId)?.countryName ?? "").localeCompare(div(b.divisionId)?.countryName ?? "") ||
+          (div(a.divisionId)?.tier ?? 0) - (div(b.divisionId)?.tier ?? 0),
+      );
+    const groups = new Map<string, typeof leagues>();
+    for (const c of leagues) {
+      const country = div(c.divisionId)?.countryName ?? "Overig";
+      const arr = groups.get(country) ?? [];
+      arr.push(c);
+      groups.set(country, arr);
+    }
+    return [...groups.entries()];
+  }, [ws.competitions, ws.activeSeasonId, ws.divisions]);
+
+  const [scope, setScope] = useState<"mine" | "all">("mine");
   const [selId, setSelId] = useState<UUID>(myComps[0]?.id ?? "");
-  const comp = myComps.find((c) => c.id === selId) ?? myComps[0];
+  // Zoek de geselecteerde competitie in álle competities (werkt voor beide modi).
+  const comp =
+    ws.competitions.find((c) => c.id === selId && c.seasonId === ws.activeSeasonId) ?? myComps[0];
 
   if (!comp) {
     return (
@@ -1138,25 +1163,79 @@ function CompetitionsView({ save }: { save: CareerSave }) {
   const standings = isLeague ? computeStandings(comp.teamIds, compMatches) : [];
   const champ = isLeague ? null : knockoutChampion(save, comp.id);
 
+  // Topscorers van deze competitie dit seizoen (goals + assists per speler).
+  const tally = new Map<UUID, { goals: number; assists: number }>();
+  for (const m of compMatches) {
+    if (m.state !== "played") continue;
+    for (const id of m.goalScorers ?? []) {
+      const e = tally.get(id) ?? { goals: 0, assists: 0 };
+      e.goals += 1;
+      tally.set(id, e);
+    }
+    for (const id of m.goalAssists ?? []) {
+      const e = tally.get(id) ?? { goals: 0, assists: 0 };
+      e.assists += 1;
+      tally.set(id, e);
+    }
+  }
+  const topScorers = [...tally.entries()]
+    .map(([id, s]) => ({ id, ...s }))
+    .sort((a, b) => b.goals - a.goals || b.assists - a.assists)
+    .slice(0, 15);
+
   return (
     <div className="ch-body ch-compdetail">
       <section className="ch-panel ch-complist">
         <h2>Competities</h2>
-        <ul className="cd-tabs">
-          {myComps.map((c) => (
-            <li key={c.id}>
-              <button
-                className={`cd-tab${c.id === comp.id ? " sel" : ""}`}
-                onClick={() => setSelId(c.id)}
-              >
-                <span>{c.name}</span>
-                <span className="cd-tab-meta">
-                  {c.scope === "league" ? "competitie" : "knock-out"} · {c.teamIds.length} clubs
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="cd-scope">
+          <button className={`cd-scope-btn${scope === "mine" ? " sel" : ""}`} onClick={() => setScope("mine")}>
+            Mijn
+          </button>
+          <button className={`cd-scope-btn${scope === "all" ? " sel" : ""}`} onClick={() => setScope("all")}>
+            Alle competities
+          </button>
+        </div>
+        {scope === "mine" ? (
+          <ul className="cd-tabs">
+            {myComps.map((c) => (
+              <li key={c.id}>
+                <button
+                  className={`cd-tab${c.id === comp.id ? " sel" : ""}`}
+                  onClick={() => setSelId(c.id)}
+                >
+                  <span>{c.name}</span>
+                  <span className="cd-tab-meta">
+                    {c.scope === "league" ? "competitie" : "knock-out"} · {c.teamIds.length} clubs
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="cd-allcountries">
+            {otherLeaguesByCountry.map(([country, comps]) => (
+              <div key={country} className="cd-country">
+                <div className="cd-country-h">{country}</div>
+                <ul className="cd-tabs">
+                  {comps.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        className={`cd-tab${c.id === comp.id ? " sel" : ""}`}
+                        onClick={() => setSelId(c.id)}
+                      >
+                        <span>
+                          {c.name}
+                          {c.teamIds.includes(myId) ? " ★" : ""}
+                        </span>
+                        <span className="cd-tab-meta">{c.teamIds.length} clubs</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="ch-panel ch-comppanel">
@@ -1194,6 +1273,39 @@ function CompetitionsView({ save }: { save: CareerSave }) {
             <span className="cd-teams-label">Deelnemers:</span>{" "}
             {comp.teamIds.map((id) => teamName(id)).join(", ")}
           </div>
+        )}
+
+        {isLeague && topScorers.length > 0 && (
+          <>
+            <h3 className="ch-recent-title">Topscorers</h3>
+            <table className="cd-standings cd-scorers">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th className="ch-tn">Speler</th>
+                  <th className="ch-tn">Club</th>
+                  <th>G</th>
+                  <th>A</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topScorers.map((s, i) => {
+                  const pl = ws.players.find((p) => p.id === s.id);
+                  const name = pl ? `${pl.firstName.charAt(0)}. ${pl.lastName}` : "—";
+                  const club = pl?.teamId ? teamName(pl.teamId) : "—";
+                  return (
+                    <tr key={s.id} className={pl?.teamId === myId ? "ch-me" : ""}>
+                      <td>{i + 1}</td>
+                      <td className="ch-tn">{name}</td>
+                      <td className="ch-tn">{club}</td>
+                      <td className="ch-pts">{s.goals}</td>
+                      <td>{s.assists}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
         )}
 
         <h3 className="ch-recent-title">Wedstrijden</h3>

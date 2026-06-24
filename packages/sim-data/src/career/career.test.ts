@@ -123,6 +123,45 @@ describe("career-seizoen", () => {
     expect(totalPlayed).toBe(16 * 30);
   });
 
+  it("kent doelpunten toe aan spelers -> topscorerslijst klopt qua totalen", () => {
+    const rng = new Rng(2468);
+    const world = buildWorld(rng, 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 55, managerName: "T", teamId: myTeam.id });
+    const simRng = new Rng(99);
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 80) {
+      const next = teamNextMatch(save.worldState.matches, myTeam.id);
+      const date = next ? next.date : save.worldState.matches.find((m) => m.state === "scheduled")!.date;
+      save = playMatchday(save, simRng, date);
+      guard++;
+    }
+    const ws = save.worldState;
+    const league = ws.competitions.find(
+      (c) => c.seasonId === ws.activeSeasonId && c.format === "league" && c.teamIds.includes(myTeam.id),
+    )!;
+    const matches = ws.matches.filter((m) => m.competitionId === league.id && m.state === "played");
+    let totalGoals = 0;
+    let totalScorers = 0;
+    for (const m of matches) {
+      totalGoals += m.score.home + m.score.away;
+      totalScorers += (m.goalScorers ?? []).length;
+    }
+    expect(matches.length).toBeGreaterThan(0);
+    expect(totalGoals).toBeGreaterThan(0);
+    // Elke goal is aan precies één speler toegekend.
+    expect(totalScorers).toBe(totalGoals);
+    // De aggregatie levert een topscorer met meerdere goals.
+    const tally = new Map<string, number>();
+    for (const m of matches) for (const id of m.goalScorers ?? []) tally.set(id, (tally.get(id) ?? 0) + 1);
+    const top = [...tally.values()].sort((a, b) => b - a)[0]!;
+    expect(top).toBeGreaterThanOrEqual(3);
+    // Assists zijn een subset van de goals (niet elk doelpunt heeft er een).
+    const totalAssists = matches.reduce((s, m) => s + (m.goalAssists ?? []).length, 0);
+    expect(totalAssists).toBeGreaterThan(0);
+    expect(totalAssists).toBeLessThanOrEqual(totalGoals);
+  });
+
   it("seizoensovergang: promotie/degradatie + nieuw seizoen", () => {
     const world = buildWorld(new Rng(42), 2025);
     let save = createCareer(world, { seed: 7, managerName: "T", teamId: world.teams[0]!.id });

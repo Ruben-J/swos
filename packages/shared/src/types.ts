@@ -230,6 +230,11 @@ export interface Match {
     shotsAway: number;
     motmPlayerId: UUID | null;
   };
+  /** Doelpuntenmakers (één playerId per goal, in scoorvolgorde home dan away).
+   *  Optioneel: oudere saves / nog niet gespeelde wedstrijden hebben dit niet. */
+  goalScorers?: UUID[];
+  /** Assistgevers (subset; niet elk doelpunt heeft een assist). */
+  goalAssists?: UUID[];
 }
 
 export interface Season {
