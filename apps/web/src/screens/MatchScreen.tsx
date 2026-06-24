@@ -108,12 +108,51 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
           exhausted={snap?.activeExhausted ?? false}
         />
 
+        {snap && snap.phase !== "walkout" && <Radar snap={snap} config={config} />}
+
         <div className="match-topbar">
           <button className="btn" onClick={onExit}>
             Terug
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Radar/minimap: top-down mini-veld met een stip per speler (in teamkleur) en de
+ *  bal. Draait met de hoofdcamera mee (1e helft valt home omhoog aan; 2e helft
+ *  gespiegeld), zodat "boven op de radar" = "boven op het scherm". */
+function Radar({ snap, config }: { snap: MatchSnapshot; config: MatchConfig }) {
+  const flip = snap.half >= 2;
+  // Sim: x in [0,105] (lengte) -> verticale as; y in [0,68] (breedte) -> horizontaal.
+  const rx = (p: { x: number; y: number }): number => (flip ? 68 - p.y : p.y);
+  const ry = (p: { x: number; y: number }): number => (flip ? p.x : 105 - p.x);
+  const homeCol = config.home.colorPrimary;
+  const awayCol = config.away.colorPrimary;
+  return (
+    <div className="match-radar">
+      <svg viewBox="0 0 68 105">
+        <rect className="rdr-bg" x="0.6" y="0.6" width="66.8" height="103.8" rx="2" />
+        <line className="rdr-ln" x1="0.6" y1="52.5" x2="67.4" y2="52.5" />
+        <circle className="rdr-ln" cx="34" cy="52.5" r="9.15" />
+        <rect className="rdr-ln" x="13.84" y="0.6" width="40.32" height="16.5" />
+        <rect className="rdr-ln" x="13.84" y="87.9" width="40.32" height="16.5" />
+        {snap.players.map((p) => {
+          const mine = config.humanSide === p.side && p.isActive;
+          return (
+            <circle
+              key={p.id}
+              cx={rx(p)}
+              cy={ry(p)}
+              r={mine ? 3.4 : 2.5}
+              fill={p.side === "home" ? homeCol : awayCol}
+              className={mine ? "rdr-me" : "rdr-dot"}
+            />
+          );
+        })}
+        <circle className="rdr-ball" cx={rx(snap.ball)} cy={ry(snap.ball)} r="1.8" />
+      </svg>
     </div>
   );
 }

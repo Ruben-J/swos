@@ -572,6 +572,27 @@ button.btn:disabled {
   pointer-events: auto;
 }
 
+/* Radar / minimap rechtsboven (onder de Terug-knop). */
+.match-radar {
+  position: absolute;
+  top: 54px;
+  right: 14px;
+  width: 82px;
+  height: 126px;
+  padding: 4px;
+  background: rgba(8, 12, 16, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.match-radar svg { width: 100%; height: 100%; display: block; }
+.rdr-bg { fill: rgba(28, 74, 42, 0.6); stroke: rgba(255, 255, 255, 0.18); stroke-width: 0.7; }
+.rdr-ln { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 0.7; }
+.rdr-dot { stroke: rgba(0, 0, 0, 0.35); stroke-width: 0.5; }
+.rdr-me { stroke: #fff; stroke-width: 1.3; }
+.rdr-ball { fill: #fff; stroke: #111; stroke-width: 0.5; }
+
 .match-controls {
   position: absolute;
   bottom: 16px;
