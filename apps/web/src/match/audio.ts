@@ -147,8 +147,8 @@ export class MatchAudio {
     // Zachtere envelope (langere aanzet -> geen klik) + lager volume.
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.13, t + 0.05);
-    g.gain.setValueAtTime(0.13, t + Math.max(0.06, dur - 0.08));
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.06);
+    g.gain.setValueAtTime(0.06, t + Math.max(0.06, dur - 0.08));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     // Low-pass haalt de scherpte van de boventonen af.
     const lp = this.ctx.createBiquadFilter();
@@ -181,7 +181,7 @@ export class MatchAudio {
     ab.Q.value = 1.4;
     const ag = this.ctx.createGain();
     ag.gain.setValueAtTime(0.0001, t);
-    ag.gain.exponentialRampToValueAtTime(0.028, t + 0.05);
+    ag.gain.exponentialRampToValueAtTime(0.013, t + 0.05);
     ag.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     air.connect(ab).connect(ag).connect(this.master);
     air.start(t);
