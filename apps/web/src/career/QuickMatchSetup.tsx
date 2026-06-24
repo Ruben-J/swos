@@ -3,6 +3,7 @@ import type { MatchConfig } from "@pitch/engine";
 import { Rng } from "@pitch/shared";
 import { buildWorld } from "@pitch/sim-data";
 import { worldMatchConfig } from "./careerMatch.js";
+import { ClubCrest } from "../components/ClubCrest";
 
 interface Props {
   onStart: (config: MatchConfig) => void;
@@ -107,7 +108,7 @@ export function QuickMatchSetup({ onStart, onCancel }: Props) {
                   className={`cs-item${role ? " sel" : ""}${role}`}
                   onClick={() => pick(team.id)}
                 >
-                  <span className="cs-chip" style={{ background: team.colors.primary }} />
+                  <ClubCrest name={team.name} primary={team.colors.primary} secondary={team.colors.secondary} size={20} />
                   <span className="cs-club-name">{team.name}</span>
                   {team.id === homeId && <span className="cs-tier">THUIS</span>}
                   {team.id === awayId && <span className="cs-tier">UIT</span>}

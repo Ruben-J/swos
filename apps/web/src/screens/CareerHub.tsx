@@ -30,6 +30,7 @@ import {
   transferWindowOpen,
   weeklyWageBill,
 } from "@pitch/sim-data";
+import { ClubCrest, ClubLabel } from "../components/ClubCrest";
 
 const TRAINING_OPTS: { id: TrainingFocus; label: string; hint: string; detail: string }[] = [
   {
@@ -153,14 +154,8 @@ function TeamBlock({
   const sub = row ? `${row.rank}e · ${row.points} ptn` : "—";
   const mine = teamId === myTeamId;
   const crest = (
-    <div
-      className="ch-crest"
-      style={{
-        background: `linear-gradient(135deg, ${team.colors.primary}, ${team.colors.secondary})`,
-        color: team.colors.secondary,
-      }}
-    >
-      {team.shortName.slice(0, 3).toUpperCase()}
+    <div className="ch-crest">
+      <ClubCrest name={team.name} primary={team.colors.primary} secondary={team.colors.secondary} size={40} />
     </div>
   );
   const text = (
@@ -299,14 +294,8 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
   return (
     <div className="career-hub">
       <aside className="ch-nav">
-        <div
-          className="ch-nav-logo"
-          style={{
-            background: `linear-gradient(135deg, ${myTeam.colors.primary}, ${myTeam.colors.secondary})`,
-            color: myTeam.colors.secondary,
-          }}
-        >
-          {myTeam.shortName.slice(0, 3).toUpperCase()}
+        <div className="ch-nav-logo">
+          <ClubCrest name={myTeam.name} primary={myTeam.colors.primary} secondary={myTeam.colors.secondary} size={44} />
         </div>
         <div className="ch-nav-items">
           {NAV.map((item) => (
@@ -556,7 +545,12 @@ export function CareerHub({ save, onUpdate, onPlayMatch, onNextSeason, onExit }:
                       }`}
                     >
                       <td>{r.rank}</td>
-                      <td className="ch-tn">{teamName(r.teamId)}</td>
+                      <td className="ch-tn">
+                        {(() => {
+                          const t = save.worldState.teams.find((x) => x.id === r.teamId);
+                          return t ? <ClubLabel team={t} size={15} /> : teamName(r.teamId);
+                        })()}
+                      </td>
                       <td>{r.played}</td>
                       <td>{r.won}</td>
                       <td>{r.drawn}</td>
@@ -1257,7 +1251,12 @@ function CompetitionsView({ save }: { save: CareerSave }) {
               {standings.map((r) => (
                 <tr key={r.teamId} className={r.teamId === myId ? "ch-me" : ""}>
                   <td>{r.rank}</td>
-                  <td className="ch-tn">{teamName(r.teamId)}</td>
+                  <td className="ch-tn">
+                    {(() => {
+                      const t = ws.teams.find((x) => x.id === r.teamId);
+                      return t ? <ClubLabel team={t} size={15} /> : teamName(r.teamId);
+                    })()}
+                  </td>
                   <td>{r.played}</td>
                   <td>{r.won}</td>
                   <td>{r.drawn}</td>

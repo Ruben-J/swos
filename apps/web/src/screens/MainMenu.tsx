@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CareerSave } from "@pitch/shared";
 import { divisionStandings, effectiveTransferBudget, seasonObjective } from "@pitch/sim-data";
 import { listSaves } from "../storage/saves.js";
+import { ClubCrest } from "../components/ClubCrest";
 
 interface Props {
   onQuickMatch: () => void;
@@ -189,14 +190,8 @@ export function MainMenu({ onQuickMatch, onCareer, onLoadCareer, onContinue }: P
             <div className="continue-card">
               <div className="cc-label">Doorgaan · laatste opslag</div>
               <div className="cc-team">
-                <div
-                  className="cc-crest"
-                  style={{
-                    background: `linear-gradient(135deg, ${summary.primary}, ${summary.secondary})`,
-                    color: summary.secondary,
-                  }}
-                >
-                  {summary.abbr}
+                <div className="cc-crest">
+                  <ClubCrest name={summary.name} primary={summary.primary} secondary={summary.secondary} size={46} />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div className="cc-name">{summary.name}</div>
