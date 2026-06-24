@@ -1,12 +1,20 @@
 import { useId } from "react";
 
 /**
- * Procedureel clubwapen (SVG): een schild met een patroon in de clubkleuren en
- * een monogram-rondel. Volledig DETERMINISTISCH op de clubnaam — dezelfde club
- * krijgt altijd hetzelfde wapen — en schaalt scherp op elk formaat.
+ * Procedureel clubwapen (SVG): een badge in één van meerdere VORMEN (schild,
+ * rond/roundel, zeshoek, afgerond vierkant, pennant) met een PATROON in de
+ * clubkleuren en een MIDDENSTUK (monogram of een embleem: ster, voetbal, kroon).
+ * Volledig DETERMINISTISCH op de clubnaam — dezelfde club krijgt altijd hetzelfde
+ * wapen — en schaalt scherp op elk formaat. ViewBox is altijd 0 0 40 40.
  */
 
-const SHIELD = "M4 3 H30 V19 C30 28 24 33 17 35 C10 33 4 28 4 19 Z";
+// Polygoon-/padvormen binnen een 40x40-box (midden = 20,20).
+const SHAPES: Record<string, string> = {
+  shield: "M7 4 H33 V21 C33 31 27 36 20 38 C13 36 7 31 7 21 Z",
+  rsquare: "M11 5 H29 A6 6 0 0 1 35 11 V29 A6 6 0 0 1 29 35 H11 A6 6 0 0 1 5 29 V11 A6 6 0 0 1 11 5 Z",
+  hex: "M20 3 L34 11 L34 29 L20 37 L6 29 L6 11 Z",
+  pennant: "M7 4 H33 V19 L20 37 L7 19 Z",
+};
 
 function hashStr(s: string): number {
   let h = 0x811c9dc5;
@@ -53,6 +61,57 @@ function monogram(name: string): string {
   return (words[0] ?? "?").slice(0, 2).toUpperCase();
 }
 
+const STAR =
+  "M0 -7 L1.6 -2.2 L6.7 -2.2 L2.5 0.9 L4.1 5.9 L0 2.8 L-4.1 5.9 L-2.5 0.9 L-6.7 -2.2 L-1.6 -2.2 Z";
+
+/** Voetbal: witte bol met een centrale zwarte vijfhoek en spaken. */
+function Ball(): React.JSX.Element {
+  const pts: [number, number][] = [0, 1, 2, 3, 4].map((k) => {
+    const a = (-90 + k * 72) * (Math.PI / 180);
+    return [Math.cos(a) * 2.4, Math.sin(a) * 2.4];
+  });
+  const outer: [number, number][] = [0, 1, 2, 3, 4].map((k) => {
+    const a = (-90 + k * 72) * (Math.PI / 180);
+    return [Math.cos(a) * 6, Math.sin(a) * 6];
+  });
+  return (
+    <g>
+      <circle cx="0" cy="0" r="6.4" fill="#f4f6ef" stroke="#16181d" strokeWidth="0.9" />
+      <polygon points={pts.map((p) => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ")} fill="#16181d" />
+      {pts.map((p, i) => (
+        <line
+          key={i}
+          x1={p[0].toFixed(2)}
+          y1={p[1].toFixed(2)}
+          x2={outer[i]![0].toFixed(2)}
+          y2={outer[i]![1].toFixed(2)}
+          stroke="#16181d"
+          strokeWidth="0.8"
+        />
+      ))}
+    </g>
+  );
+}
+
+/** Kroon: gouden zigzag met drie topbolletjes. */
+function Crown(): React.JSX.Element {
+  return (
+    <g>
+      <path
+        d="M-6.5 4.5 L-6.5 -2.5 L-2.7 1.2 L0 -5 L2.7 1.2 L6.5 -2.5 L6.5 4.5 Z"
+        fill="#f2c01e"
+        stroke="#7a5a10"
+        strokeWidth="0.7"
+        strokeLinejoin="round"
+      />
+      <rect x="-6.5" y="3.4" width="13" height="2.4" rx="0.6" fill="#e0a81a" stroke="#7a5a10" strokeWidth="0.6" />
+      <circle cx="-6.5" cy="-2.8" r="1.2" fill="#ffe27a" stroke="#7a5a10" strokeWidth="0.5" />
+      <circle cx="0" cy="-5.6" r="1.3" fill="#ffe27a" stroke="#7a5a10" strokeWidth="0.5" />
+      <circle cx="6.5" cy="-2.8" r="1.2" fill="#ffe27a" stroke="#7a5a10" strokeWidth="0.5" />
+    </g>
+  );
+}
+
 export function ClubCrest({
   name,
   primary,
@@ -66,79 +125,126 @@ export function ClubCrest({
 }): React.JSX.Element {
   const clip = useId();
   const rnd = rngFrom(hashStr(name));
-  const pattern = Math.floor(rnd() * 7);
-  const star = rnd() < 0.35;
+  const shapeKind = (["shield", "circle", "roundel", "rsquare", "hex", "pennant"] as const)[
+    Math.floor(rnd() * 6)
+  ]!;
+  const pattern = Math.floor(rnd() * 8);
+  const center = rnd() < 0.5 ? "mono" : (["star", "ball", "crown"] as const)[Math.floor(rnd() * 3)]!;
+  const ringStars = shapeKind === "roundel" && rnd() < 0.7;
 
   // Patroonkleur moet contrasteren met het schild; anders een af-/lichtere tint.
   let pat = secondary;
   if (Math.abs(luminance(primary) - luminance(secondary)) < 0.16) {
     pat = luminance(primary) > 0.5 ? adjust(primary, -0.5) : adjust(primary, 0.55);
   }
-  const lightShield = luminance(primary) > 0.55;
-  const roundelFill = lightShield ? "#1a1d23" : "#f4f6ef";
-  const roundelInk = lightShield ? "#f4f6ef" : "#16181d";
+  const light = luminance(primary) > 0.55;
+  const discFill = light ? "#1a1d23" : "#f4f6ef";
+  const discInk = light ? "#f4f6ef" : "#16181d";
+  const gold = "#e8c84d";
   const mono = monogram(name);
 
+  const isCircle = shapeKind === "circle" || shapeKind === "roundel";
+  const roundel = shapeKind === "roundel";
+  const fieldR = roundel ? 13.5 : 17;
+
+  // Het PATROON (geclipt op het veld). Werkt voor elke vorm.
+  const Pattern = (
+    <g clipPath={`url(#${clip})`}>
+      {pattern === 0 && <rect x="0" y="0" width="20" height="40" fill={pat} />}
+      {pattern === 1 &&
+        [10, 17, 24, 31].map((x) => <rect key={x} x={x - 1.7} y="0" width="3.4" height="40" fill={pat} />)}
+      {pattern === 2 && <rect x="0" y="16" width="40" height="8" fill={pat} />}
+      {pattern === 3 && <rect x="0" y="0" width="40" height="12" fill={pat} />}
+      {pattern === 4 && (
+        <>
+          <rect x="17.5" y="0" width="5" height="40" fill={pat} />
+          <rect x="0" y="17.5" width="40" height="5" fill={pat} />
+        </>
+      )}
+      {pattern === 5 && <path d="M2 2 L38 38 M38 2 L2 38" stroke={pat} strokeWidth="4.2" fill="none" />}
+      {pattern === 6 && (
+        <>
+          <rect x="0" y="0" width="20" height="20" fill={pat} />
+          <rect x="20" y="20" width="20" height="20" fill={pat} />
+        </>
+      )}
+      {pattern === 7 && (
+        <>
+          <rect x="0" y="9" width="40" height="5" fill={pat} />
+          <rect x="0" y="26" width="40" height="5" fill={pat} />
+        </>
+      )}
+    </g>
+  );
+
+  // Het MIDDENSTUK.
+  const cy = shapeKind === "shield" ? 19 : 20;
+  const Center =
+    center === "mono" ? (
+      <>
+        <circle cx="20" cy={cy} r={roundel ? 7.2 : 7.6} fill={discFill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.8" />
+        <text
+          x="20"
+          y={cy + 0.4}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={mono.length > 1 ? 8.4 : 11}
+          fontWeight="800"
+          fontFamily="system-ui, -apple-system, sans-serif"
+          fill={discInk}
+        >
+          {mono}
+        </text>
+      </>
+    ) : (
+      <g transform={`translate(20 ${cy})`}>
+        {/* Subtiele achtergrond-disc voor contrast. */}
+        <circle cx="0" cy="0" r="8.4" fill={light ? "rgba(0,0,0,0.16)" : "rgba(255,255,255,0.14)"} />
+        {center === "star" && <path d={STAR} fill={gold} stroke="rgba(0,0,0,0.35)" strokeWidth="0.5" />}
+        {center === "ball" && <Ball />}
+        {center === "crown" && <Crown />}
+      </g>
+    );
+
   return (
-    <svg
-      className="club-crest"
-      viewBox="0 0 34 38"
-      width={(size * 34) / 38}
-      height={size}
-      aria-hidden="true"
-    >
+    <svg className="club-crest" viewBox="0 0 40 40" width={size} height={size} aria-hidden="true">
       <defs>
         <clipPath id={clip}>
-          <path d={SHIELD} />
+          {isCircle ? <circle cx="20" cy="20" r={fieldR} /> : <path d={SHAPES[shapeKind]} />}
         </clipPath>
       </defs>
-      <path d={SHIELD} fill={primary} />
-      <g clipPath={`url(#${clip})`}>
-        {pattern === 0 && <rect x="4" y="3" width="13" height="32" fill={pat} />}
-        {pattern === 1 &&
-          [10, 17, 24].map((x) => <rect key={x} x={x - 1.7} y="0" width="3.4" height="38" fill={pat} />)}
-        {pattern === 2 && <rect x="0" y="15" width="34" height="8" fill={pat} />}
-        {pattern === 3 && <rect x="0" y="3" width="34" height="10" fill={pat} />}
-        {pattern === 4 && (
-          <>
-            <rect x="15" y="0" width="4" height="38" fill={pat} />
-            <rect x="0" y="14" width="34" height="4" fill={pat} />
-          </>
-        )}
-        {pattern === 5 && (
-          <path d="M4 3 L30 34 M30 3 L4 34" stroke={pat} strokeWidth="3.6" fill="none" />
-        )}
-        {pattern === 6 && (
-          <>
-            <rect x="4" y="3" width="13" height="15" fill={pat} />
-            <rect x="17" y="18" width="13" height="17" fill={pat} />
-          </>
-        )}
-      </g>
-      {/* Monogram-rondel. */}
-      <circle cx="17" cy="18.5" r="7.4" fill={roundelFill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.8" />
-      <text
-        x="17"
-        y="19"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={mono.length > 1 ? 8.4 : 11}
-        fontWeight="800"
-        fontFamily="system-ui, -apple-system, sans-serif"
-        fill={roundelInk}
-      >
-        {mono}
-      </text>
-      {star && (
-        <path
-          d="M0 -3 L0.9 -0.9 L3 -0.9 L1.3 0.5 L1.9 2.6 L0 1.3 L-1.9 2.6 L-1.3 0.5 L-3 -0.9 L-0.9 -0.9 Z"
-          transform="translate(17 7)"
-          fill="#f2c01e"
-          stroke="rgba(0,0,0,0.3)"
-          strokeWidth="0.3"
-        />
+
+      {/* Roundel: gouden buitenring. */}
+      {roundel && <circle cx="20" cy="20" r="18" fill={gold} stroke="rgba(0,0,0,0.5)" strokeWidth="1.1" />}
+      {roundel && <circle cx="20" cy="20" r="14.6" fill={adjust(primary, -0.35)} />}
+
+      {/* Veld + patroon. */}
+      {isCircle ? (
+        <circle cx="20" cy="20" r={fieldR} fill={primary} />
+      ) : (
+        <path d={SHAPES[shapeKind]} fill={primary} />
       )}
-      <path d={SHIELD} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth="1.5" strokeLinejoin="round" />
+      {Pattern}
+
+      {/* Roundel-sterretjes op de ring. */}
+      {ringStars &&
+        [-1, 1].map((dir) => (
+          <path
+            key={dir}
+            d={STAR}
+            transform={`translate(20 ${20 + dir * 16}) scale(0.34)`}
+            fill="#1a1d23"
+          />
+        ))}
+
+      {Center}
+
+      {/* Rand. */}
+      {isCircle ? (
+        <circle cx="20" cy="20" r={fieldR} fill="none" stroke="rgba(0,0,0,0.5)" strokeWidth={roundel ? 0.8 : 1.4} />
+      ) : (
+        <path d={SHAPES[shapeKind]} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth="1.5" strokeLinejoin="round" />
+      )}
     </svg>
   );
 }
