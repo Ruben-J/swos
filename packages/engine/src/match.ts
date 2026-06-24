@@ -47,6 +47,7 @@ const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de herva
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const KEEPER_DIVE_VZ = 6; // verticale impuls (units/s) waarmee een keeperduik de lucht in springt
 const KEEPER_RECOVER = 0.7; // s die de keeper nodig heeft om na een duik weer overeind te komen
+const GOAL_CELEBRATION = 5.0; // s dat een doelpunt-viering duurt vóór de aftrap
 const BOARDING_DIST = 3; // units buiten de lijn waar de reclameborden staan
 const BOARDING_HEIGHT = 1.5; // bal hoger dan dit vliegt over de boarding heen
 const BOARDING_REST = 0.55; // terugkaats-energie van de bal tegen de boarding
@@ -148,6 +149,9 @@ export class MatchSim {
   }
   private kickoffSide: Side = "home";
   private lastConcededSide: Side | null = null;
+  // Doelpunt-viering: de scorende ploeg rent juichend naar een hoekpunt; null
+  // als er niet gevierd wordt (bv. eigen doelpunt).
+  private celebration: { side: Side; point: Vec2 } | null = null;
   private goals: GoalEvent[] = [];
   private goalImpact: GoalImpact | null = null;
   private goalImpactSeq = 0;
@@ -344,12 +348,18 @@ export class MatchSim {
       return;
     } else if (this.phase === "goal") {
       this.phaseTimer -= dt;
-      // Bal rolt het net in en blijft daar hangen; spelers sorteren alvast
-      // voor op de aftrap (eigen helft).
+      // Bal rolt het net in en blijft daar hangen.
       stepBall(this.ball, dt);
       this.settleBallInNet();
-      this.driftToKickoff(dt);
+      // Eerste deel van de viering rennen ze juichend naar de hoek; de laatste
+      // ~1.6s sorteren ze voor op de aftrap (eigen helft).
+      if (this.celebration && this.phaseTimer > 1.6) {
+        this.stepCelebration(dt);
+      } else {
+        this.driftToKickoff(dt);
+      }
       if (this.phaseTimer <= 0) {
+        this.celebration = null;
         // De ploeg die tegen kreeg, trapt af.
         this.resetForKickoff(this.lastConcededSide ?? otherSide(this.kickoffSide));
       }
@@ -1512,7 +1522,6 @@ export class MatchSim {
 
   private onGoal(scoringSide: Side): void {
     this.phase = "goal";
-    this.phaseTimer = 1.8;
     this.lastConcededSide = otherSide(scoringSide);
     // Maker = laatste aanraking; zit die bij de tegenpartij -> eigen doelpunt.
     const toucher = this.byId(this.ball.lastTouchId);
@@ -1524,9 +1533,51 @@ export class MatchSim {
       minute: Math.max(1, Math.min(RULES.matchMinutes, Math.ceil(this.matchMinute()))),
       ownGoal,
     });
+    // Viering: bij een echt doelpunt rent de scorende ploeg juichend naar een
+    // hoekvlag bij het doel waar gescoord is; bij een eigen doelpunt geen feest.
+    if (ownGoal) {
+      this.phaseTimer = 1.8;
+      this.celebration = null;
+    } else {
+      this.phaseTimer = GOAL_CELEBRATION;
+      const goalX = scoringSide === "home" ? PITCH.width : 0; // doel waar gescoord is
+      const refY = toucher ? toucher.pos.y : this.ball.pos.y;
+      this.celebration = {
+        side: scoringSide,
+        point: {
+          x: goalX === 0 ? 4 : PITCH.width - 4, // net binnen de hoek
+          y: refY < PITCH.height / 2 ? 4 : PITCH.height - 4,
+        },
+      };
+    }
     // Bal houdt z'n vaart -> rolt door in het doel (niet op de lijn blijven).
     this.ball.ownerId = null;
     this.ballProtectedFor = null;
+  }
+
+  /**
+   * Doelpunt-viering: de scorende veldspelers rennen juichend naar het hoekpunt
+   * en juichen daar; de keeper en de tegenpartij keren terug naar hun
+   * aftrap-positie.
+   */
+  private stepCelebration(dt: number): void {
+    const cel = this.celebration!;
+    const halfX = PITCH.width / 2;
+    for (const p of this.players) {
+      p.tackleCooldown = Math.max(0, p.tackleCooldown - dt);
+      if (p.side === cel.side && !p.isKeeper) {
+        const to = { x: cel.point.x - p.pos.x, y: cel.point.y - p.pos.y };
+        const d = len(to);
+        moveTowards(p, d > 3 ? normalize(to) : { x: 0, y: 0 }, d > 6, dt);
+        p.facing = angleOf({ x: cel.point.x - p.pos.x, y: cel.point.y - p.pos.y });
+        p.state = "celebrate"; // juichen (armen omhoog) — ook al rennend
+      } else {
+        const ax = p.side === "home" ? Math.min(p.anchor.x, halfX - 2) : Math.max(p.anchor.x, halfX + 2);
+        const to = { x: ax - p.pos.x, y: p.anchor.y - p.pos.y };
+        moveTowards(p, len(to) > 1 ? normalize(to) : { x: 0, y: 0 }, false, dt);
+      }
+    }
+    this.resolvePlayerCollisions();
   }
 
   /** Bal het net in laten rollen en daar laten hangen (afremmen + clampen). */

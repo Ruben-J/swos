@@ -29,7 +29,8 @@ export type PlayerActState =
   | "slide"
   | "header"
   | "recover"
-  | "dive";
+  | "dive"
+  | "celebrate";
 
 export interface PlayerEntity {
   id: string;

@@ -12,7 +12,7 @@ export interface PixelLook {
   socks: number;
 }
 
-export type HoldPose = "throw" | "keeper" | null;
+export type HoldPose = "throw" | "keeper" | "cheer" | null;
 
 // Native pixel-resolutie van een staande sprite. Ruimer dan een SWOS-tegel zodat
 // er detail in kan (grote haarbos, gezicht, korte mouwen). Met de camera-zoom +
@@ -70,7 +70,9 @@ export function getPersonTexture(
   hold: HoldPose,
 ): Texture {
   const dir = dirBucket(face);
-  const fr = hold ? 0 : ((frame % 2) + 2) % 2;
+  // Ingooi/keeper = vaste pose; juichen mag wél de loopframes (benen lopen mee
+  // terwijl de armen omhoog zijn).
+  const fr = hold === "throw" || hold === "keeper" ? 0 : ((frame % 2) + 2) % 2;
   const key = `${lookKey(look)}|${dir}|${fr}|${hold ?? "_"}`;
   let tex = standCache.get(key);
   if (tex) return tex;
@@ -193,7 +195,8 @@ function drawPerson(
     add(ax, armY + dy, 2, 4, look.shirt); // lange mouw
     add(ax, armY + dy + 4, 2, 1, look.skin); // hand
   };
-  if (hold === "throw") {
+  if (hold === "throw" || hold === "cheer") {
+    // Beide armen omhoog (ingooi of juichen).
     add(leftAx, shirtY - 6, 2, 8, look.shirt); // lange mouw omhoog
     add(rightAx, shirtY - 6, 2, 8, look.shirt);
     add(leftAx, shirtY - 7, 2, 1, look.skin); // hand bovenaan

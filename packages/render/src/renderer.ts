@@ -18,6 +18,7 @@ function makePersonSprite(): Sprite {
 }
 
 const PX_PER_UNIT = 11;
+const CROWD_CHEER_MS = 4500; // hoe lang het publiek uitbundig juicht na een doelpunt
 
 // SWOS-achtige kanteling: geen echte perspectief, alleen de lengte-as van het
 // veld (doel-naar-doel, verticaal op het scherm) wat indrukken zodat het lijkt
@@ -81,8 +82,13 @@ export class MatchRenderer {
   private crowdTiles: {
     tile: TilingSprite;
     dir: { x: number; y: number };
-    tex: Record<"front" | "back" | "left" | "right", Texture>;
+    side: "home" | "away"; // welk publiek (voor juichen bij hun doelpunt)
+    phase: number; // fase-offset zodat tribunes niet synchroon bewegen
+    // Per kijkrichting drie frames: [rustig-a, rustig-b, juich].
+    tex: Record<"front" | "back" | "left" | "right", Texture[]>;
   }[] = [];
+  // Actieve juich-impuls op de tribune na een doelpunt.
+  private crowdCheer: { side: "home" | "away"; t0: number } | null = null;
   // Beveiliging + fotografen op de asfalt-track: pixel-sprites in de world-laag,
   // elk frame tegen rot in gedraaid zodat ze rechtop op het scherm staan.
   private trackFigures: Sprite[] = [];
@@ -184,12 +190,18 @@ export class MatchRenderer {
     // Publiekstribunes: thuispubliek rondom (overwegend thuiskleuren), met een
     // uitvak in de uitclubkleuren. Per tribune wordt het kop-aanzicht zo gekozen
     // dat ze naar het veld kijken (front/back/links/rechts).
-    type ViewSet = Record<"front" | "back" | "left" | "right", Texture>;
+    // Per view drie frames: [rustig-a, rustig-b, juich].
+    type ViewSet = Record<"front" | "back" | "left" | "right", Texture[]>;
+    const frames = (p: number, s: number, v: "front" | "back" | "left" | "right"): Texture[] => [
+      this.makeCrowdTexture(p, s, v, 0, false),
+      this.makeCrowdTexture(p, s, v, 1, false),
+      this.makeCrowdTexture(p, s, v, 2, true),
+    ];
     const makeSet = (p: number, s: number): ViewSet => ({
-      front: this.makeCrowdTexture(p, s, "front"),
-      back: this.makeCrowdTexture(p, s, "back"),
-      left: this.makeCrowdTexture(p, s, "left"),
-      right: this.makeCrowdTexture(p, s, "right"),
+      front: frames(p, s, "front"),
+      back: frames(p, s, "back"),
+      left: frames(p, s, "left"),
+      right: frames(p, s, "right"),
     });
     const homeSet = makeSet(hexToNum(this.colors.home.primary), hexToNum(this.colors.home.secondary));
     const awaySet = makeSet(hexToNum(this.colors.away.primary), hexToNum(this.colors.away.secondary));
@@ -197,27 +209,28 @@ export class MatchRenderer {
     this.crowdTiles = [];
     const addStand = (
       set: ViewSet,
+      side: "home" | "away",
       x: number,
       y: number,
       w: number,
       h: number,
       dir: { x: number; y: number }, // richting naar het veld (world)
     ): void => {
-      const t = new TilingSprite({ texture: set.front, width: w, height: h });
+      const t = new TilingSprite({ texture: set.front[0], width: w, height: h });
       t.tileScale.set(ts);
       t.position.set(x, y);
       this.stadium.addChild(t);
-      this.crowdTiles.push({ tile: t, dir, tex: set });
+      this.crowdTiles.push({ tile: t, dir, side, tex: set, phase: this.crowdTiles.length });
     };
-    addStand(homeSet, -e3, -e3, W + 2 * e3, stand, { x: 0, y: 1 }); // zijlijn y<0 (veld onder)
-    addStand(homeSet, -e3, H + e2, W + 2 * e3, stand, { x: 0, y: -1 }); // zijlijn y>H (veld boven)
-    addStand(homeSet, -e3, -e2, stand, H + 2 * e2, { x: 1, y: 0 }); // achter doel x<0 (veld rechts)
-    addStand(homeSet, W + e2, -e2, stand, H + 2 * e2, { x: -1, y: 0 }); // achter doel x>W (veld links)
+    addStand(homeSet, "home", -e3, -e3, W + 2 * e3, stand, { x: 0, y: 1 }); // zijlijn y<0 (veld onder)
+    addStand(homeSet, "home", -e3, H + e2, W + 2 * e3, stand, { x: 0, y: -1 }); // zijlijn y>H (veld boven)
+    addStand(homeSet, "home", -e3, -e2, stand, H + 2 * e2, { x: 1, y: 0 }); // achter doel x<0 (veld rechts)
+    addStand(homeSet, "home", W + e2, -e2, stand, H + 2 * e2, { x: -1, y: 0 }); // achter doel x>W (veld links)
     // Uitvak: blok in de tribune achter het x=W-doel, aan de y=H-kant — valt na de
     // veld-rotatie (1e helft) rechtsboven in beeld.
     const awayLen = 0.42 * H;
     const awayY0 = H + e2 - awayLen; // grens tussen uit- en thuisvak
-    addStand(awaySet, W + e2, awayY0, stand, awayLen, { x: -1, y: 0 }); // achter x>W-doel
+    addStand(awaySet, "away", W + e2, awayY0, stand, awayLen, { x: -1, y: 0 }); // uitvak achter x>W-doel
 
     // Tribune-trappen: betonnen gangpaden die radiaal door de tribune lopen
     // (van de voorwand naar achter), zodat het publiek in vakken opgedeeld is.
@@ -381,6 +394,8 @@ export class MatchRenderer {
     primary: number,
     secondary: number,
     view: "front" | "back" | "left" | "right",
+    frame: number,
+    cheer: boolean,
   ): Texture {
     const cols = 8;
     const rows = 9;
@@ -395,7 +410,9 @@ export class MatchRenderer {
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#15181d"; // donkere tribune-achtergrond
     ctx.fillRect(0, 0, T_W, T_H);
-    let seed = (primary ^ 0x9e3779b1) >>> 0;
+    // Het frame + cheer zaaien de variatie -> per frame staan/juichen andere
+    // mensen, wat (bij het wisselen) beweging op de tribune geeft.
+    let seed = (primary ^ 0x9e3779b1 ^ Math.imul(frame + 1, 0x85ebca6b) ^ (cheer ? 0x51ed : 0)) >>> 0;
     const rnd = (): number => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed / 4294967296;
@@ -416,13 +433,15 @@ export class MatchRenderer {
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const cx = c * cw + 1 + ((rnd() * 2) | 0);
-        const top = r * ch + 1;
+        // Sommige toeschouwers "staan op" (iets omhoog) — bij juichen veel meer.
+        const up = rnd() < (cheer ? 0.55 : 0.13) ? 2 : 0;
+        const top = r * ch + 1 - up;
         const body = bodies[(rnd() * bodies.length) | 0]!;
         const skin = skins[(rnd() * skins.length) | 0]!;
         const hair = hairs[(rnd() * hairs.length) | 0]!;
-        const armsUp = rnd() < 0.32;
+        const armsUp = rnd() < (cheer ? 0.8 : 0.28);
         const scarf = rnd() < 0.4;
-        const flag = rnd() < 0.07;
+        const flag = rnd() < (cheer ? 0.14 : 0.07);
         // Romp (schouders + bovenlijf), naar de kijker/het veld toe.
         px(cx, top + 6, 12, 8, body);
         px(cx, top + 6, 12, 1, "rgba(255,255,255,0.12)"); // schouder-highlight
@@ -733,6 +752,9 @@ export class MatchRenderer {
       const s0 = Math.min(1, Math.max(0, (gi.y - (cy - gw / 2)) / gw));
       const intensity = Math.min(1, Math.max(0.4, gi.speed / 32));
       this.netWobble = { goalX: gi.goalX, s0, intensity, t0: performance.now() };
+      // Het publiek van de scorende kant gaat juichen. goalX=0 -> away scoorde
+      // (in het home-doel); goalX=W -> home scoorde.
+      this.crowdCheer = { side: gi.goalX === 0 ? "away" : "home", t0: performance.now() };
     }
 
     let bulge = 0;
@@ -953,14 +975,29 @@ export class MatchRenderer {
     this.world.rotation = rot;
     this.world.scale.set(scaleX, scaleY);
     // Crowd-texture + track-figuren tegen de veldrotatie in draaien -> rechtop.
-    // Per tribune kiezen we het kop-aanzicht zodat ze naar het veld kijken:
-    // de veld-richting (world) op het scherm bepaalt front/back/links/rechts.
+    // Per tribune kiezen we (a) het kop-aanzicht zodat ze naar het veld kijken,
+    // en (b) het animatie-frame: subtiel "leven" tijdens het spel, en uitbundig
+    // juichen voor de scorende kant na een doelpunt.
+    const now = performance.now() / 1000;
+    const cheer =
+      this.crowdCheer && performance.now() - this.crowdCheer.t0 < CROWD_CHEER_MS
+        ? this.crowdCheer.side
+        : null;
     for (const c of this.crowdTiles) {
       const sx = c.dir.x * cos - c.dir.y * sin; // veld-richting -> scherm
       const sy = c.dir.x * sin + c.dir.y * cos;
       const view =
         Math.abs(sy) >= Math.abs(sx) ? (sy > 0 ? "front" : "back") : sx > 0 ? "right" : "left";
-      c.tile.texture = c.tex[view];
+      let f: number;
+      if (cheer === c.side) {
+        // Juichen: snel wisselen tussen het juich-frame en een rustig frame (springt).
+        f = Math.floor(now * 6 + c.phase) % 2 === 0 ? 2 : 0;
+      } else {
+        // Subtiel leven: traag wisselen tussen de twee rustige frames, met fase-
+        // offset zodat tribunes niet synchroon bewegen.
+        f = (Math.floor(now * 1.3 + c.phase * 0.5) + c.phase) % 2;
+      }
+      c.tile.texture = c.tex[view][f]!;
       c.tile.tileRotation = -rot;
     }
     for (const s of this.trackFigures) s.rotation = -rot;
@@ -1060,7 +1097,9 @@ export class MatchRenderer {
         node.shadow.scale.set(1);
         const moving = moved > 0.04;
         const frame = moving ? (Math.floor(node.phase * 0.5) % 2) + 1 : 0;
-        sp.texture = getPersonTexture(node.look, pf + rot, frame, hold);
+        // Juichende speler: armen omhoog (pose "cheer"); verder de bal-houding.
+        const pose = p.state === "celebrate" ? "cheer" : hold;
+        sp.texture = getPersonTexture(node.look, pf + rot, frame, pose);
         if (hold) heldBall = { x: s.x, y: s.y, face: pf + rot, mode: hold };
       }
 
