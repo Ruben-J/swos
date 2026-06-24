@@ -258,6 +258,63 @@ describe("MatchSim", () => {
     expect(sim.ball.pos.y).toBeGreaterThan(24);
   });
 
+  it("lage bal naast kaatst tegen de boarding (vliegt niet ver door)", () => {
+    const sim = new MatchSim({ ...makeConfig(7), humanSide: "home" });
+    const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };
+    let g = 0;
+    while (sim.snapshot().phase !== "play" && g < 4000) {
+      const s = sim.snapshot();
+      sim.step(TICK_DT, s.awaitingHumanRestart ? press : emptyIntent());
+      g++;
+    }
+
+    // Spelers ver weg van de bal; bal laag en hard naar de zijlijn (y omlaag).
+    for (const p of sim.players) p.pos = { x: 52, y: 62 };
+    sim.ball.pos = { x: 52, y: 3 };
+    sim.ball.z = 0;
+    sim.ball.vel = { x: 0, y: -55 };
+    sim.ball.vz = 0;
+    sim.ball.ownerId = null;
+    sim.ball.lastTouchId = null;
+
+    let minY = 99;
+    for (let i = 0; i < 150; i++) {
+      sim.step(TICK_DT, emptyIntent());
+      minY = Math.min(minY, sim.ball.pos.y);
+    }
+    // De bal is echt buiten geweest, maar kaatst bij de boarding (~3u) terug i.p.v.
+    // tientallen meters door te schieten.
+    expect(minY).toBeLessThan(-0.5);
+    expect(minY).toBeGreaterThan(-4);
+  });
+
+  it("hoge bal naast vliegt over de boarding heen (geen kaats)", () => {
+    const sim = new MatchSim({ ...makeConfig(7), humanSide: "home" });
+    const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };
+    let g = 0;
+    while (sim.snapshot().phase !== "play" && g < 4000) {
+      const s = sim.snapshot();
+      sim.step(TICK_DT, s.awaitingHumanRestart ? press : emptyIntent());
+      g++;
+    }
+
+    for (const p of sim.players) p.pos = { x: 52, y: 62 };
+    sim.ball.pos = { x: 52, y: 3 };
+    sim.ball.z = 3; // hoog: boven de boarding
+    sim.ball.vel = { x: 0, y: -55 };
+    sim.ball.vz = 6;
+    sim.ball.ownerId = null;
+    sim.ball.lastTouchId = null;
+
+    let minY = 99;
+    for (let i = 0; i < 30; i++) {
+      sim.step(TICK_DT, emptyIntent());
+      minY = Math.min(minY, sim.ball.pos.y);
+    }
+    // Hoge bal kaatst niet: hij gaat ruim voorbij de boarding-lijn.
+    expect(minY).toBeLessThan(-6);
+  });
+
   it("tackle naast de bal op een tegenstander = overtreding -> vrije trap", () => {
     const sim = new MatchSim({ ...makeConfig(8), humanSide: "home" });
     const press = { ...emptyIntent(), actionReleased: true, actionHeld: 0.4 };

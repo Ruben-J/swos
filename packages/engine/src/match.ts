@@ -47,6 +47,9 @@ const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de herva
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const KEEPER_DIVE_VZ = 6; // verticale impuls (units/s) waarmee een keeperduik de lucht in springt
 const KEEPER_RECOVER = 0.7; // s die de keeper nodig heeft om na een duik weer overeind te komen
+const BOARDING_DIST = 3; // units buiten de lijn waar de reclameborden staan
+const BOARDING_HEIGHT = 1.5; // bal hoger dan dit vliegt over de boarding heen
+const BOARDING_REST = 0.55; // terugkaats-energie van de bal tegen de boarding
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
 const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
 const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
@@ -1652,6 +1655,36 @@ export class MatchSim {
     this.phase = "whistle";
   }
 
+  /**
+   * Bal die naast/over de lijn gaat kaatst tegen de reclameborden (een stukje
+   * buiten de lijn). Een lage bal stuitert terug; een hoge bal (boven de borden)
+   * vliegt eroverheen. In de goalmond staat een net i.p.v. boarding.
+   */
+  private bounceOffBoarding(): void {
+    const b = this.ball;
+    if (b.z >= BOARDING_HEIGHT) return; // hoge bal: over de boarding heen
+    const d = BOARDING_DIST;
+    const goalLo = PITCH.height / 2 - PITCH.goalWidth / 2;
+    const goalHi = PITCH.height / 2 + PITCH.goalWidth / 2;
+    const inGoalMouth = b.pos.y > goalLo - 0.5 && b.pos.y < goalHi + 0.5;
+    if (!inGoalMouth) {
+      if (b.pos.x < -d && b.vel.x < 0) {
+        b.pos.x = -d;
+        b.vel.x *= -BOARDING_REST;
+      } else if (b.pos.x > PITCH.width + d && b.vel.x > 0) {
+        b.pos.x = PITCH.width + d;
+        b.vel.x *= -BOARDING_REST;
+      }
+    }
+    if (b.pos.y < -d && b.vel.y < 0) {
+      b.pos.y = -d;
+      b.vel.y *= -BOARDING_REST;
+    } else if (b.pos.y > PITCH.height + d && b.vel.y > 0) {
+      b.pos.y = PITCH.height + d;
+      b.vel.y *= -BOARDING_REST;
+    }
+  }
+
   /** Ligt `spot` in het strafschopgebied dat `attackingGoal` verdedigt? */
   private isInPenaltyBox(spot: Vec2, atkGoal: Vec2): boolean {
     const inWidth = Math.abs(spot.y - PITCH.height / 2) < PITCH.penaltyBoxWidth / 2;
@@ -1668,6 +1701,7 @@ export class MatchSim {
   private stepWhistle(dt: number): void {
     this.whistleTimer -= dt;
     stepBall(this.ball, dt);
+    this.bounceOffBoarding(); // bal kaatst tegen de reclameborden (of vliegt eroverheen)
 
     const r = this.pendingRestart;
     if (r) {
