@@ -310,42 +310,65 @@ export class MatchRenderer {
     divider.rect(W + e2, awayY0 - 0.9, stand, 1.8).fill(0x0e0e0e);
     this.stadium.addChild(divider);
 
-    // Beveiliging + fotografen als upright pixel-figuren op de asfalt-track.
+    // Beveiliging + fotografen als upright pixel-figuren op de asfalt-track, op
+    // ~spelerformaat. Ze staan ONREGELMATIG verspreid: soms een groepje dicht
+    // bij elkaar, soms een leeg stuk track — niet overal hoeft iemand te staan.
     this.trackFigures = [];
     const polTex = this.makeFigureTexture("police");
     const camTex = this.makeFigureTexture("camera");
+    // Schaal zo dat de figuren — ná de TILT-indrukking van de wereldlaag —
+    // ongeveer even hoog op het scherm komen als de spelers (~spelerformaat).
+    const FIG_FOOT = 21; // voet-rij in de 22px-hoge texture
+    const FIG_SCALE = 19 / (FIG_FOOT * TILT);
     const place = (tex: Texture, x: number, y: number): void => {
       const s = new Sprite(tex);
-      s.anchor.set(0.5, 0.86); // voeten op de track
-      s.scale.set(1.1);
+      s.anchor.set(0.5, FIG_FOOT / 22); // voeten op de track
+      s.scale.set(FIG_SCALE);
       s.position.set(x, y);
       this.stadium.addChild(s);
       this.trackFigures.push(s); // rotation = -rot per frame -> rechtop
     };
     const tMid = (e1 + e2) / 2; // hart van de asfalt-track
-    // Fotografen achter beide doelen.
-    const nP = 8;
-    for (let i = 0; i < nP; i++) {
-      const y = H * (0.16 + (0.68 * i) / (nP - 1));
-      place(camTex, -tMid, y);
-      place(camTex, W + tMid, y);
-    }
-    // Politie langs beide zijlijnen.
-    const nQ = 9;
-    for (let i = 0; i < nQ; i++) {
-      const x = W * (0.08 + (0.84 * i) / (nQ - 1));
-      place(polTex, x, -tMid);
-      place(polTex, x, H + tMid);
-    }
-    // Politie-cluster tussen uit- en thuisvak (op de x>W-track bij de grens).
-    for (let k = -2; k <= 2; k++) place(polTex, W + tMid, awayY0 + k * 4.2);
+    // Deterministische RNG (stabiel per wedstrijd, maar onregelmatig verdeeld).
+    let fseed = (hexToNum(this.colors.home.primary) ^ 0x5bd1e995) >>> 0;
+    const frnd = (): number => {
+      fseed = (Math.imul(fseed, 1664525) + 1013904223) >>> 0;
+      return fseed / 4294967296;
+    };
+    // Loop één track-zijde af (t = 0..1) en plaats figuren met gaten én clusters.
+    const runSide = (posFn: (t: number) => { x: number; y: number }, camChance: number): void => {
+      let t = 0.04 + frnd() * 0.06;
+      while (t < 0.96) {
+        if (frnd() < 0.6) {
+          // Eén figuur, of soms een klein groepje dicht opeen.
+          const n = frnd() < 0.28 ? 2 + ((frnd() * 2) | 0) : 1;
+          for (let k = 0; k < n && t < 0.98; k++) {
+            const pp = posFn(t);
+            place(frnd() < camChance ? camTex : polTex, pp.x, pp.y);
+            t += 0.028 + frnd() * 0.016; // krappe tussenruimte binnen een groepje
+          }
+          t += 0.05 + frnd() * 0.13; // gat na het groepje
+        } else {
+          t += 0.08 + frnd() * 0.14; // leeg stuk track
+        }
+      }
+    };
+    // Achter beide doelen: vooral fotografen.
+    runSide((t) => ({ x: -tMid, y: lerp(0.06 * H, 0.94 * H, t) }), 0.8);
+    runSide((t) => ({ x: W + tMid, y: lerp(0.06 * H, 0.94 * H, t) }), 0.8);
+    // Langs beide zijlijnen: vooral stewards/politie.
+    runSide((t) => ({ x: lerp(0.06 * W, 0.94 * W, t), y: -tMid }), 0.15);
+    runSide((t) => ({ x: lerp(0.06 * W, 0.94 * W, t), y: H + tMid }), 0.15);
+    // Vast politiecluster bij de grens tussen uit- en thuisvak.
+    for (let k = -1; k <= 1; k++) place(polTex, W + tMid, awayY0 + k * 4.2);
   }
 
-  /** Klein upright pixel-figuurtje voor de track: een steward/agent (geel hesje)
-   *  of een fotograaf (camera tegen het gezicht). SWOS-achtig blokkerig. */
+  /** Upright pixel-figuur voor de track, op ~spelerformaat (zelfde blokkerige
+   *  SWOS-stijl en pixeldichtheid als de spelers): een steward/agent (geel hesje
+   *  + pet) of een fotograaf (camera voor het gezicht, armen omhoog). */
   private makeFigureTexture(kind: "police" | "camera"): Texture {
-    const W = 11;
-    const H = 15;
+    const W = 14;
+    const H = 22;
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
@@ -355,30 +378,50 @@ export class MatchRenderer {
       ctx.fillStyle = c;
       ctx.fillRect(x, y, w, h);
     };
-    const OUT = "#101012";
+    const OUT = "#0d0d0f";
+    const FACE = "#e8b78f";
     if (kind === "police") {
-      px(2, 5, 7, 10, OUT); // outline lijf
-      px(3, 11, 2, 3, "#1a1f33"); // benen
-      px(6, 11, 2, 3, "#1a1f33");
-      px(3, 5, 5, 6, "#f2cf1c"); // geel hesje
-      px(3, 8, 5, 1, "#caa800"); // hesje-schaduwlijn
-      px(2, 6, 1, 4, "#1a2a55"); // armen (mouwen)
-      px(8, 6, 1, 4, "#1a2a55");
-      px(3, 1, 5, 5, OUT); // outline hoofd
-      px(4, 2, 3, 3, "#e6b48c"); // gezicht
-      px(3, 0, 5, 2, "#16204a"); // politiepet
+      // Benen + schoenen.
+      px(4, 15, 2, 6, "#222633");
+      px(8, 15, 2, 6, "#222633");
+      px(4, 20, 2, 1, OUT);
+      px(8, 20, 2, 1, OUT);
+      // Romp: geel hi-vis hesje met reflectieband.
+      px(2, 8, 10, 8, OUT); // outline lijf
+      px(3, 9, 8, 6, "#f2cf1c"); // hesje
+      px(3, 9, 8, 1, "#ffe884"); // schouder-highlight
+      px(3, 12, 8, 1, "#cfa800"); // reflectieband
+      // Armen (mouwen) + handen.
+      px(2, 9, 1, 6, "#1c2a55");
+      px(11, 9, 1, 6, "#1c2a55");
+      px(2, 14, 1, 2, FACE);
+      px(11, 14, 1, 2, FACE);
+      // Hoofd + pet.
+      px(4, 2, 6, 6, OUT); // outline hoofd
+      px(5, 3, 4, 4, FACE); // gezicht
+      px(4, 0, 6, 3, "#16204a"); // politiepet
+      px(4, 2, 6, 1, "#0e1530"); // klep
     } else {
-      px(2, 5, 7, 10, OUT); // outline lijf
-      px(3, 11, 2, 3, "#23262c"); // benen
-      px(6, 11, 2, 3, "#23262c");
-      px(3, 6, 5, 6, "#33373f"); // donkere jas
-      px(2, 7, 1, 4, "#33373f"); // armen omhoog naar de camera
-      px(8, 7, 1, 4, "#33373f");
-      px(4, 3, 3, 3, "#e6b48c"); // hoofd
-      px(2, 2, 7, 4, OUT); // camera-outline (voor het gezicht gehouden)
-      px(3, 3, 5, 2, "#0c0c0c"); // camera-body
-      px(7, 3, 2, 2, "#3a3d42"); // lens-tube
-      px(4, 3, 2, 2, "#bfe0ff"); // lens-glans
+      // Benen + schoenen.
+      px(4, 15, 2, 6, "#26292f");
+      px(8, 15, 2, 6, "#26292f");
+      px(4, 20, 2, 1, OUT);
+      px(8, 20, 2, 1, OUT);
+      // Romp: donkere jas.
+      px(2, 8, 10, 8, OUT);
+      px(3, 9, 8, 6, "#34383f"); // jas
+      px(3, 9, 8, 1, "#44484f"); // highlight
+      // Armen omhoog naar de camera.
+      px(2, 7, 2, 5, "#34383f");
+      px(10, 7, 2, 5, "#34383f");
+      // Hoofd (deels achter de camera).
+      px(4, 3, 6, 5, OUT);
+      px(5, 5, 4, 2, FACE);
+      // Camera voor het gezicht + uitstekende lens.
+      px(3, 1, 8, 5, OUT); // camera-outline
+      px(4, 2, 6, 3, "#0c0c0c"); // body
+      px(10, 2, 3, 3, "#2f3338"); // lens-tube
+      px(11, 3, 2, 2, "#bfe0ff"); // lens-glans
     }
     const tex = Texture.from(canvas);
     tex.source.scaleMode = "nearest";
