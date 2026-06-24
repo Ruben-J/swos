@@ -925,8 +925,23 @@ export class MatchSim {
     if (dBall < PLAYER.tackleRange) {
       p.slideTouched = true;
       const owner = this.byId(this.ball.ownerId);
-      if (!owner || owner.side !== p.side || this.rng.chance(0.5 + (p.stats.tackling - 50) / 180)) {
-        kickBall(this.ball, { dir: dirTo(p, this.ball.pos), power: 6, loft: 0, curve: 0, byId: p.id, bySide: p.side });
+      const ownTeam = owner !== null && owner.side === p.side;
+      // Een sliding wint geen gecontroleerde bal: hij TIKT 'm stevig WEG in de
+      // glij-richting (met wat spreiding), zodat de bal echt loskomt i.p.v. zacht
+      // voor de voeten te blijven. Een bal van een teamgenoot alleen soms (tackling).
+      if (!ownTeam || this.rng.chance(0.5 + (p.stats.tackling - 50) / 180)) {
+        const dir =
+          len(p.vel) > 0.1 ? normalize(p.vel) : dirTo(p, this.ball.pos);
+        const ang = Math.atan2(dir.y, dir.x) + this.rng.range(-0.4, 0.4);
+        const power = 10 + this.rng.range(0, 5);
+        kickBall(this.ball, {
+          dir: { x: Math.cos(ang), y: Math.sin(ang) },
+          power,
+          loft: this.rng.range(0, 1.2),
+          curve: 0,
+          byId: p.id,
+          bySide: p.side,
+        });
       }
       return;
     }

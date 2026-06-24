@@ -619,4 +619,31 @@ describe("MatchSim", () => {
     // De overtreding levert een hervatting op (fluit-fase ingezet).
     expect(["whistle", "deadball"]).toContain(sim.snapshot().phase);
   });
+
+  it("een sliding op de bal tikt de bal stevig weg", () => {
+    const sim = new MatchSim(makeConfig(11));
+    sim.phase = "play";
+    for (const p of sim.players) p.pos = { x: 95, y: 64 };
+
+    const slider = sim.players.find((p) => p.side === "home" && !p.isKeeper)!;
+    const dribbler = sim.players.find((p) => p.side === "away" && !p.isKeeper)!;
+    // Tegenstander met de bal aan de voet; de glijder komt er pal in.
+    dribbler.pos = { x: 51, y: 34 };
+    sim.ball.pos = { x: 51, y: 34 };
+    sim.ball.vel = { x: 0, y: 0 };
+    sim.ball.ownerId = dribbler.id;
+    sim.ball.lastTouchId = dribbler.id;
+    sim.ball.lastTouchSide = "away";
+    sim.ball.sinceKick = 999;
+    slider.pos = { x: 49.6, y: 34 };
+    slider.vel = { x: 12, y: 0 }; // glijdt richting de bal
+    slider.state = "slide";
+    slider.stateTimer = 0.5;
+    slider.slideTouched = false;
+
+    sim.step(TICK_DT, emptyIntent());
+    // De bal is duidelijk WEGGETIKT (snelheid omhoog) en niet meer van de dribbelaar.
+    expect(Math.hypot(sim.ball.vel.x, sim.ball.vel.y)).toBeGreaterThan(6);
+    expect(sim.ball.ownerId).not.toBe(dribbler.id);
+  });
 });
