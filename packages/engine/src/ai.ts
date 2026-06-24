@@ -811,20 +811,29 @@ function keeperCommand(
   // Is er niemand vrij, dan een klare hoge bal naar voren.
   if (ball.ownerId === gk.id) {
     const opps = players.filter((o) => o.side !== gk.side);
-    // Kan een tegenstander de pass-LIJN onderscheppen? Tegenstander die loodrecht
-    // dicht bij het segment gk->ontvanger staat (en er echt tussen, niet erachter)
-    // blokkeert de lijn -> dan niet inspelen.
-    const laneClear = (to: Vec2): boolean => {
-      const ax = to.x - gk.pos.x;
-      const ay = to.y - gk.pos.y;
-      const segLen2 = ax * ax + ay * ay;
-      if (segLen2 < 1e-6) return true;
+    // Passnelheid van een gerichte uitworp/pass (zelfde formule als de trap zelf).
+    const passSpeedTo = (d: number): number => clamp(10 + d * 0.45, 12, 28);
+    // Kan een tegenstander de ROL-pass onderscheppen? We rekenen INTERCEPTIE-BEWUST:
+    // een trage rollende bal over afstand geeft een tegenstander tijd om in de
+    // lijn te stappen. Voor elke tegenstander tussen keeper en ontvanger: haalt hij
+    // het kruispunt eerder dan de bal (incl. de speler die er pal tussen staat),
+    // dan is de lijn DICHT. Zo speelt de keeper niet door een drukke zone.
+    const laneOpen = (to: Vec2, passSpeed: number): boolean => {
+      const dx = to.x - gk.pos.x;
+      const dy = to.y - gk.pos.y;
+      const segLen = Math.hypot(dx, dy);
+      if (segLen < 1e-3) return true;
+      const ux = dx / segLen;
+      const uy = dy / segLen;
       for (const o of opps) {
-        let t = ((o.pos.x - gk.pos.x) * ax + (o.pos.y - gk.pos.y) * ay) / segLen2;
-        if (t <= 0.08 || t >= 0.98) continue; // achter de keeper of voorbij de ontvanger
-        const cx = gk.pos.x + ax * t;
-        const cy = gk.pos.y + ay * t;
-        if (Math.hypot(o.pos.x - cx, o.pos.y - cy) < 2.8) return false; // staat ertussen
+        const rx = o.pos.x - gk.pos.x;
+        const ry = o.pos.y - gk.pos.y;
+        const proj = rx * ux + ry * uy;
+        if (proj <= 1.5 || proj >= segLen - 0.5) continue; // achter de keeper of voorbij de ontvanger
+        const perp = Math.abs(rx * -uy + ry * ux);
+        const tBall = proj / passSpeed; // bal bij het kruispunt
+        const tOpp = Math.max(0, perp - 1.2) / 7.5; // tegenstander naar de lijn (~7.5 u/s, lichaam 1.2)
+        if (tOpp <= tBall + 0.25) return false; // hij kan er eerder bij -> onderschept
       }
       return true;
     };
@@ -834,10 +843,10 @@ function keeperCommand(
       if (mate.id === gk.id || mate.side !== gk.side) continue;
       let nearOpp = Infinity;
       for (const o of opps) nearOpp = Math.min(nearOpp, dist(o.pos, mate.pos));
-      if (nearOpp < 6) continue; // gedekt -> niet inspelen
+      if (nearOpp < 6.5) continue; // ontvanger gedekt -> niet inspelen
       const d = dist(gk.pos, mate.pos);
       if (d > 45) continue; // te ver voor een gerichte, lage uitworp/pass
-      if (!laneClear(mate.pos)) continue; // tegenstander kan ertussen komen
+      if (!laneOpen(mate.pos, passSpeedTo(d))) continue; // lijn niet vrij -> niet riskeren
       const score = Math.min(nearOpp, 14) - Math.abs(d - 18) * 0.2; // ruim + op afstand
       if (score > bestScore) {
         bestScore = score;
@@ -848,7 +857,7 @@ function keeperCommand(
       const d = dist(gk.pos, best.pos);
       cmd.kick = { dir: dirTo(gk, best.pos), power: clamp(10 + d * 0.45, 12, 28), loft: 0, curve: 0, targetId: best.id };
     } else {
-      // Niemand vrij én vrije lijn -> verre trap naar voren (boombal downfield).
+      // Niemand veilig vrij -> verre trap naar voren (boombal downfield).
       cmd.kick = { dir: normalize({ x: upfield.x - gk.pos.x, y: upfield.y - gk.pos.y }), power: 34, loft: 8, curve: 0 };
     }
     return cmd;

@@ -280,3 +280,32 @@ describe("voorzet-anticipatie", () => {
     expect(rwT.y).toBeGreaterThan(44); // dicht bij zijn anker-y (50), niet farY (~40)
   });
 });
+
+describe("keeper-distributie uit de handen", () => {
+  it("speelt NIET door een dichte lijn maar trapt ver weg", () => {
+    // Home-keeper met de bal in de handen; één teamgenoot opzij, maar een
+    // tegenstander staat pal in de pass-lijn ernaartoe.
+    const gk = pl("gk", "home", 5, 34, "GK");
+    const mate = pl("cb", "home", 22, 20, "CB");
+    const blocker = pl("opp", "away", 13, 27, "ST"); // pal in de lijn gk->cb
+    const ball = createBall({ x: 5, y: 34 });
+    ball.ownerId = gk.id;
+    const players = [gk, mate, blocker];
+    const plan = computeTeamPlan(players, ball, "home", "home");
+    const cmd = computeAiCommand(players, ball, gk, "home", plan, true);
+    expect(cmd.kick).not.toBeNull();
+    expect(cmd.kick?.targetId ?? null).toBeNull(); // geen korte pass door de drukte
+    expect(cmd.kick!.power).toBeGreaterThan(30); // maar een verre trap naar voren
+  });
+
+  it("speelt WEL in als de lijn vrij is", () => {
+    const gk = pl("gk", "home", 5, 34, "GK");
+    const mate = pl("cb", "home", 22, 20, "CB");
+    const ball = createBall({ x: 5, y: 34 });
+    ball.ownerId = gk.id;
+    const players = [gk, mate]; // geen tegenstander in de lijn
+    const plan = computeTeamPlan(players, ball, "home", "home");
+    const cmd = computeAiCommand(players, ball, gk, "home", plan, true);
+    expect(cmd.kick?.targetId).toBe(mate.id); // gerichte inworp/pass
+  });
+});
