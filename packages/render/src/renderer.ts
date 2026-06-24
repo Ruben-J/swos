@@ -410,9 +410,12 @@ export class MatchRenderer {
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#15181d"; // donkere tribune-achtergrond
     ctx.fillRect(0, 0, T_W, T_H);
-    // Het frame + cheer zaaien de variatie -> per frame staan/juichen andere
-    // mensen, wat (bij het wisselen) beweging op de tribune geeft.
-    let seed = (primary ^ 0x9e3779b1 ^ Math.imul(frame + 1, 0x85ebca6b) ^ (cheer ? 0x51ed : 0)) >>> 0;
+    // BELANGRIJK: de seed hangt NIET van frame/cheer af. Zo blijft de hele
+    // tribune-opstelling (wie waar zit, welke kleur/haar/sjaal) in elk frame
+    // exact gelijk. Alleen de animatie-staat (opstaan / armen omhoog) verschilt
+    // per frame, en alleen voor een vaste, kleine groep — zodat steeds dezelfde
+    // personen op hun eigen plek even gaan staan i.p.v. dat alles verspringt.
+    let seed = (primary ^ 0x9e3779b1) >>> 0;
     const rnd = (): number => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed / 4294967296;
@@ -432,21 +435,45 @@ export class MatchRenderer {
     // Achterste rijen eerst (vóór-rijen overlappen ze -> diepte).
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
+        // --- IDENTITEIT (stabiel: zelfde aantal rnd()-trekkingen per cel, dus
+        //     identiek in elk frame). Niets hier hangt van frame/cheer af. ---
         const cx = c * cw + 1 + ((rnd() * 2) | 0);
-        // Sommige toeschouwers "staan op" (iets omhoog) — bij juichen veel meer.
-        const up = rnd() < (cheer ? 0.55 : 0.13) ? 2 : 0;
-        const top = r * ch + 1 - up;
         const body = bodies[(rnd() * bodies.length) | 0]!;
         const skin = skins[(rnd() * skins.length) | 0]!;
         const hair = hairs[(rnd() * hairs.length) | 0]!;
-        const armsUp = rnd() < (cheer ? 0.8 : 0.28);
-        const scarf = rnd() < 0.4;
-        const flag = rnd() < (cheer ? 0.14 : 0.07);
+        const hasScarf = rnd() < 0.4;
+        const scarfCol = rnd() < 0.5 ? team2 : team;
+        const hasFlag = rnd() < 0.1;
+        const flagCol = rnd() < 0.5 ? team : team2;
+        // Deze persoon is een "opstaander": gaat tijdens het spel af en toe even
+        // staan. bobPhase bepaalt in wélk rustig frame (0 of 1) hij staat, zodat
+        // de groep zachtjes wisselt. wantsArms: steekt dan soms de armen op.
+        const bobber = rnd() < 0.1;
+        const bobPhase = rnd() < 0.5 ? 1 : 0;
+        const wantsArms = rnd() < 0.45;
+        // Juich-staat (frame 2): meeste mensen staan + armen omhoog.
+        const cheerStand = rnd() < 0.72;
+        const cheerArms = rnd() < 0.85;
+
+        // --- ANIMATIE (verschilt per frame, verandert de identiteit NIET) ---
+        let standing: boolean;
+        let armsUp: boolean;
+        if (cheer) {
+          standing = cheerStand;
+          armsUp = cheerArms;
+        } else {
+          // Rustig: alleen opstaanders bewegen, en alleen in hun eigen frame.
+          standing = bobber && bobPhase === frame;
+          armsUp = standing && wantsArms;
+        }
+        const up = standing ? 2 : 0;
+        const top = r * ch + 1 - up;
+
         // Romp (schouders + bovenlijf), naar de kijker/het veld toe.
         px(cx, top + 6, 12, 8, body);
         px(cx, top + 6, 12, 1, "rgba(255,255,255,0.12)"); // schouder-highlight
         // Sjaal: gekleurde band onder de hals (vaak in de andere teamkleur).
-        if (scarf) px(cx, top + 6, 12, 2, rnd() < 0.5 ? team2 : team);
+        if (hasScarf) px(cx, top + 6, 12, 2, scarfCol);
         // Hoofd, per kijkrichting — zo kijkt elke tribune naar het veld.
         if (view === "back") {
           px(cx + 3, top, 6, 6, hair); // achterhoofd: alleen haar (kijkt weg)
@@ -466,15 +493,15 @@ export class MatchRenderer {
         if (armsUp) {
           px(cx, top + 1, 2, 6, skin); // linkerarm omhoog
           px(cx + 10, top + 1, 2, 6, skin); // rechterarm omhoog
-          if (scarf) px(cx, top, 12, 2, rnd() < 0.5 ? team : team2); // sjaal omhoog gehouden
+          if (hasScarf) px(cx, top, 12, 2, scarfCol); // sjaal omhoog gehouden
         } else {
           px(cx, top + 7, 2, 5, skin); // armen langs het lijf
           px(cx + 10, top + 7, 2, 5, skin);
         }
         // Vlag: paal + wapperend doek boven het hoofd.
-        if (flag) {
+        if (hasFlag) {
           px(cx + 9, top - 7, 1, 9, "#caa46a");
-          px(cx + 10, top - 7, 6, 4, rnd() < 0.5 ? team : team2);
+          px(cx + 10, top - 7, 6, 4, flagCol);
         }
       }
     }
