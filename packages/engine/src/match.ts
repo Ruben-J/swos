@@ -1440,10 +1440,14 @@ export class MatchSim {
     this.ball.sinceKick = 0; // voorkomt dat de keeper 'm meteen terugpakt
     this.ball.lastTouchSide = gk.side;
     this.ball.lastTouchId = gk.id;
-    gk.state = "dive";
-    gk.stateTimer = 0.6;
-    gk.z = 0;
-    gk.vz = KEEPER_DIVE_VZ;
+    // De redding is gemaakt: de keeper maakt zijn duik AF (landt) en komt weer
+    // overeind — hij lanceert zich NIET opnieuw de lucht in. De recover-staat
+    // laat de duik-arc rustig neerkomen en houdt hem even op de grond.
+    gk.state = "recover";
+    gk.stateTimer = KEEPER_RECOVER;
+    gk.vel.x = 0;
+    gk.vel.y = 0;
+    gk.vz = 0;
   }
 
   /** Doelpuntdetectie. Returnt true als er gescoord is. */

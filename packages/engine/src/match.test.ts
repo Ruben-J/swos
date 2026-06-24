@@ -528,4 +528,45 @@ describe("MatchSim", () => {
     expect(gi.speed).toBeGreaterThan(5);
     expect(Math.abs(gi.y - PITCH.height / 2)).toBeLessThan(2);
   });
+
+  it("keeper bokst de bal weg en maakt zijn duik af (geen tweede duik)", () => {
+    const sim = new MatchSim(makeConfig(7));
+    sim.phase = "play";
+    const gk = sim.players.find((p) => p.isKeeper && p.side === "home")!;
+    gk.pos = { x: 6, y: 34 };
+    gk.state = "dive";
+    gk.stateTimer = 0.3;
+    gk.z = 1.5;
+    gk.vz = 1;
+    gk.vel = { x: 0, y: 0 };
+    gk.diveTarget = { x: 6, y: 34 };
+    // Keiharde, hoge bal pal voor de keeper -> nooit klemvast: hij bokst 'm weg.
+    sim.ball.pos = { x: 6.2, y: 34.1 };
+    sim.ball.vel = { x: -80, y: 0 };
+    sim.ball.z = 1.0;
+    sim.ball.vz = 0;
+    sim.ball.ownerId = null;
+    sim.ball.sinceKick = 1;
+    sim.ball.lastTouchId = "a-9";
+    sim.ball.lastTouchSide = "away";
+
+    // Eén stap: de keeper raakt de bal en bokst 'm weg.
+    sim.step(TICK_DT, emptyIntent());
+    expect(sim.ball.ownerId).toBeNull(); // weggebokst, niet vastgepakt
+    expect(gk.state).toBe("recover"); // komt neer + staat op, geen nieuwe duik
+
+    // Volg het herstel: hij mag NIET opnieuw de lucht in en niet terug naar 'dive'.
+    let reDived = false;
+    let maxZAfterLanding = 0;
+    let landed = false;
+    for (let i = 0; i < 60; i++) {
+      sim.step(TICK_DT, emptyIntent());
+      if (gk.state === "dive") reDived = true;
+      if ((gk.z ?? 0) <= 0.001) landed = true;
+      if (landed) maxZAfterLanding = Math.max(maxZAfterLanding, gk.z ?? 0);
+    }
+    expect(reDived).toBe(false); // geen tweede duik tijdens het herstel
+    expect(maxZAfterLanding).toBeLessThan(0.05); // blijft op de grond na de landing
+    expect(["idle", "run"]).toContain(gk.state); // hersteld -> weer normaal
+  });
 });
