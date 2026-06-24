@@ -56,10 +56,13 @@ export class Camera {
   private clampToPitch(): void {
     const halfW = this.viewW / 2;
     const halfH = this.viewH / 2;
-    const minX = -PITCH.margin + halfW;
-    const maxX = PITCH.width + PITCH.margin - halfW;
-    const minY = -PITCH.margin + halfH;
-    const maxY = PITCH.height + PITCH.margin - halfH;
+    // Ruimere overscan voorbij de doel-/zijlijnen, zodat de camera bij een doel/
+    // hoek verder doorschuift en er een groter deel van de tribune in beeld komt.
+    const over = 15;
+    const minX = -over + halfW;
+    const maxX = PITCH.width + over - halfW;
+    const minY = -over + halfH;
+    const maxY = PITCH.height + over - halfH;
     this.center.x = minX <= maxX ? clamp(this.center.x, minX, maxX) : PITCH.width / 2;
     this.center.y = minY <= maxY ? clamp(this.center.y, minY, maxY) : PITCH.height / 2;
   }

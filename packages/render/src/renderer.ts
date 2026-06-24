@@ -204,11 +204,33 @@ export class MatchRenderer {
     const awayY0 = H + e2 - awayLen; // grens tussen uit- en thuisvak
     addStand(awayCrowd, W + e2, awayY0, stand, awayLen);
 
-    // Tribune-voorwand ("onderkant van de tribune"): een betonnen wand aan de
-    // binnenrand van elke tribune (over de voorste crowd-rijen), met een lichte
-    // reling aan de veldzijde — zo zitten de voorste toeschouwers er bovenop
-    // i.p.v. hard af te kappen.
-    const wall = 2.2 * u;
+    // Tribune-trappen: betonnen gangpaden die radiaal door de tribune lopen
+    // (van de voorwand naar achter), zodat het publiek in vakken opgedeeld is.
+    const aisles = new Graphics();
+    const AISLE = 0x474a51;
+    const STEP = 0x585c64;
+    const aw = 2.4 * u; // breedte van een gangpad
+    const drawAisle = (x: number, y: number, w: number, h: number, vertical: boolean): void => {
+      aisles.rect(x, y, w, h).fill(AISLE);
+      if (vertical) for (let yy = y + 1; yy < y + h; yy += 4) aisles.rect(x, yy, w, 1).fill(STEP);
+      else for (let xx = x + 1; xx < x + w; xx += 4) aisles.rect(xx, y, 1, h).fill(STEP);
+    };
+    for (const fx of [0.16, 0.4, 0.6, 0.84]) {
+      const x = fx * W - aw / 2;
+      drawAisle(x, -e3, aw, stand, true); // zijlijn y<0
+      drawAisle(x, H + e2, aw, stand, true); // zijlijn y>H
+    }
+    for (const fy of [0.3, 0.7]) {
+      const y = fy * H - aw / 2;
+      drawAisle(-e3, y, stand, aw, false); // achter doel x<0
+      drawAisle(W + e2, y, stand, aw, false); // achter doel x>W
+    }
+    this.stadium.addChild(aisles);
+
+    // Tribune-voorwand ("onderkant van de tribune"): een lage betonnen wand aan
+    // de binnenrand (over de onderste crowd-rij), met een lichte reling aan de
+    // veldzijde — zo zitten de voorste toeschouwers er nét bovenop.
+    const wall = 1.2 * u;
     const ew = e2 + wall;
     const front = new Graphics();
     const WALL = 0x42454c;
@@ -218,10 +240,10 @@ export class MatchRenderer {
     front.rect(-ew, -e2, wall, H + 2 * e2).fill(WALL); // links
     front.rect(W + e2, -e2, wall, H + 2 * e2).fill(WALL); // rechts
     // Reling (lichte rand) aan de veldzijde van elke wand.
-    front.rect(-ew, -e2 - 2, W + 2 * ew, 2).fill(RAIL); // boven
-    front.rect(-ew, H + e2, W + 2 * ew, 2).fill(RAIL); // onder
-    front.rect(-e2 - 2, -e2, 2, H + 2 * e2).fill(RAIL); // links
-    front.rect(W + e2, -e2, 2, H + 2 * e2).fill(RAIL); // rechts
+    front.rect(-ew, -e2 - 1.6, W + 2 * ew, 1.6).fill(RAIL); // boven
+    front.rect(-ew, H + e2, W + 2 * ew, 1.6).fill(RAIL); // onder
+    front.rect(-e2 - 1.6, -e2, 1.6, H + 2 * e2).fill(RAIL); // links
+    front.rect(W + e2, -e2, 1.6, H + 2 * e2).fill(RAIL); // rechts
     this.stadium.addChild(front);
 
     // Asfalt-perimeter tussen de boarding en de tribunes.
