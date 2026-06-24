@@ -226,3 +226,57 @@ describe("binnen de lijnen", () => {
     }
   });
 });
+
+describe("voorzet-anticipatie", () => {
+  it("bij een wijde, diepe bal links duikt de verre aanvaller naar de tweede paal en schuift de CM op", () => {
+    // Home valt aan richting x=105; baldrager breekt door langs de bovenflank
+    // (lage y) tot naast de box.
+    const ball = createBall({ x: 96, y: 12 });
+    ball.ownerId = "lw";
+    ball.lastTouchSide = "home";
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const lw = pl("lw", "home", 96, 12, "LW"); // baldrager (verre... = balkant)
+    const rw = pl("rw", "home", 80, 50, "RW"); // verre flank (onderkant)
+    const st = pl("st", "home", 85, 34, "ST"); // centraal
+    const cm = pl("cm", "home", 60, 40, "CM"); // middenvelder
+    const cb = pl("cb", "home", 45, 34, "CB");
+    // Tegenstanders bepalen een ruime buitenspellijn (diep bij hun doel).
+    const ogk = pl("ogk", "away", 102, 34, "GK");
+    const od1 = pl("od1", "away", 100, 30, "CB");
+    const od2 = pl("od2", "away", 100, 38, "CB");
+    const plan = computeTeamPlan([gk, lw, rw, st, cm, cb, ogk, od1, od2], ball, "home", "home");
+
+    const rwT = plan.targets.get("rw")!;
+    const stT = plan.targets.get("st")!;
+    const cmT = plan.targets.get("cm")!;
+
+    // Verre aanvaller (RW) komt vanaf de onderflank naar de tweede paal: aan de
+    // andere kant van het midden dan de bal (bal y<34 -> tweede paal y>34) én in de box.
+    expect(rwT.y).toBeGreaterThan(36);
+    expect(rwT.x).toBeGreaterThan(88);
+    // Andere aanvaller (ST) bezet de eerste paal/centraal, ook diep in de box.
+    expect(stT.x).toBeGreaterThan(88);
+    // Aanvallende middenvelder schuift op tot rond de rand van de box (~17,5m van
+    // het doel = x≈87,5) voor de teruglegbal.
+    expect(cmT.x).toBeGreaterThanOrEqual(86);
+  });
+
+  it("bij een centrale bal worden er geen box-runs geforceerd", () => {
+    const ball = createBall({ x: 96, y: 34 }); // diep maar centraal -> niet "wijd"
+    ball.ownerId = "lw";
+    ball.lastTouchSide = "home";
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const lw = pl("lw", "home", 96, 34, "LW");
+    const rw = pl("rw", "home", 80, 50, "RW");
+    const st = pl("st", "home", 85, 34, "ST");
+    const cb = pl("cb", "home", 45, 34, "CB");
+    const ogk = pl("ogk", "away", 102, 34, "GK");
+    const od1 = pl("od1", "away", 100, 30, "CB");
+    const od2 = pl("od2", "away", 100, 38, "CB");
+    const plan = computeTeamPlan([gk, lw, rw, st, cb, ogk, od1, od2], ball, "home", "home");
+    // RW wordt niet naar de tweede paal getrokken: hij houdt zijn eigen (onder)flank
+    // grofweg aan i.p.v. naar een vaste box-y van ~40.
+    const rwT = plan.targets.get("rw")!;
+    expect(rwT.y).toBeGreaterThan(44); // dicht bij zijn anker-y (50), niet farY (~40)
+  });
+});

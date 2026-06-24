@@ -262,6 +262,58 @@ export function computeTeamPlan(
     }
   }
 
+  // Voorzet-anticipatie: komt de bal WIJD én DIEP (iemand breekt door langs een
+  // flank tot bij/naast de box), dan duiken de off-ball aanvallers de box in en
+  // schuiven de aanvallende middenvelders op tot de rand van de box:
+  //  - de aanvaller van de VERRE flank loopt naar de tweede paal (anticipeert op
+  //    een voorzet vanaf de andere kant),
+  //  - de andere aanvaller(s) bezetten de eerste paal / centraal,
+  //  - CM/AM komen tot de rand van de box, iets naar het midden, zodat een
+  //    teruggelegde voorzet meteen ingeschoten kan worden.
+  // De buitenspel-clamp hieronder houdt de lopers vanzelf onside.
+  if (inPossession) {
+    const attackDirX = side === "home" ? 1 : -1;
+    const goalX = side === "home" ? PITCH.width : 0;
+    const cy = PITCH.height / 2;
+    const depthToGoal = (goalX - ball.pos.x) * attackDirX; // 0 = op de doellijn
+    const wide = Math.abs(ball.pos.y - cy) > 12; // bal in de flank, niet centraal
+    const deep = depthToGoal < PITCH.penaltyBoxDepth + 8 && depthToGoal > -2;
+    if (wide && deep) {
+      const ballSide = ball.pos.y < cy ? -1 : 1; // kant waar de bal is
+      const nearY = cy + ballSide * 5; // eerste paal (balkant)
+      const farY = cy - ballSide * 6; // tweede paal (verre kant)
+      const boxX = goalX - attackDirX * 7; // tussen doelgebied en strafschopstip
+      const edgeX = goalX - attackDirX * (PITCH.penaltyBoxDepth + 1); // rand van de box
+      const carrier = ball.ownerId;
+      let farTaken = false;
+      let nearTaken = false;
+      for (const p of outfield) {
+        if (p.id === carrier) continue;
+        const cat = roleCategory(p.position);
+        if (cat === "attacker") {
+          const fromFar = (p.anchor.y - cy) * ballSide < 0; // staat aan de verre flank
+          if (fromFar && !farTaken) {
+            targets.set(p.id, { x: boxX, y: farY });
+            farTaken = true;
+          } else if (!nearTaken) {
+            targets.set(p.id, { x: boxX, y: nearY });
+            nearTaken = true;
+          } else {
+            targets.set(p.id, { x: boxX, y: cy }); // extra man centraal
+          }
+        } else if (p.position === "CM" || p.position === "AM") {
+          // Aanvallende middenvelders schuiven op tot de rand van de box, iets
+          // naar het midden — klaar voor de teruglegbal. (DM blijft als rugdekking.)
+          const t = targets.get(p.id);
+          if (!t) continue;
+          const pushedX = side === "home" ? Math.max(t.x, edgeX) : Math.min(t.x, edgeX);
+          const pulledY = cy + (t.y - cy) * 0.5;
+          targets.set(p.id, { x: pushedX, y: pulledY });
+        }
+      }
+    }
+  }
+
   // Buitenspel: houd de voorste spelers gelijk met de op-één-na-laatste
   // tegenstander. Je kunt niet buitenspel staan op de eigen helft of achter de
   // bal, dus de toegestane lijn = verst van die drie (middenlijn / bal / linie).
