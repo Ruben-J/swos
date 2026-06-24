@@ -1,9 +1,13 @@
 /**
- * Wedstrijd-audio, volledig GESYNTHETISEERD met de WebAudio API (geen
- * geluidsbestanden): een doorlopend publiek-bed waarvan het geroezemoes
- * aanzwelt als de bal bij een doel komt, plus losse events — gejuich bij een
- * goal, een "oooh" bij een redding, balcontact bij passes/schoten en een
- * scheidsrechtersfluit bij overtredingen/rust/einde.
+ * Wedstrijd-audio op basis van echte samples (mp3's in /public/audio), met
+ * synthese als terugval als een bestand niet laadt:
+ *  - een doorlopend stadion-bed waarvan het volume aanzwelt als de bal bij een
+ *    doel komt;
+ *  - gejuich (met opbouw -> piek) bij een doelpunt;
+ *  - losse scheidsrechtersfluitjes (uit één bestand met meerdere fluiten);
+ *  - balcontact-tikjes (uit één bestand met meerdere trappen);
+ *  - een "oooh" bij een redding (gesynthetiseerd; daar is geen sample voor).
+ * De audiocontext wordt op de eerste user-gesture hervat (autoplay-beleid).
  */
 
 type AC = AudioContext;
@@ -12,12 +16,25 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+// Segmenten (start in s, lengte in s) van de losse geluiden, bepaald met
+// stilte-detectie op de bronbestanden.
+const WHISTLES: [number, number][] = [
+  [0.83, 0.5],
+  [3.75, 0.85],
+  [6.8, 0.66],
+  [9.54, 0.45],
+  [12.78, 0.83],
+  [18.52, 0.72],
+];
+const KICK_STARTS = [0.58, 1.98, 3.68, 4.99, 6.41, 7.84, 9.06, 10.41, 11.67, 13.12];
+const KICK_DUR = 0.24;
+
 export class MatchAudio {
   private ctx: AC | null = null;
   private master: GainNode | null = null;
   private crowdGain: GainNode | null = null;
-  private crowdFilter: BiquadFilterNode | null = null;
   private crowdSrc: AudioBufferSourceNode | null = null;
+  private buffers: Partial<Record<"ambience" | "cheer" | "whistle" | "kick", AudioBuffer>> = {};
   private started = false;
   private disposed = false;
   private lastIntensity = -1;
@@ -35,37 +52,23 @@ export class MatchAudio {
       return;
     }
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.55;
+    this.master.gain.value = 0.7;
     this.master.connect(this.ctx.destination);
   }
 
-  /** Hervat de context (autoplay-beleid vereist een user-gesture). */
   private ensureRunning(): void {
     if (this.ctx && this.ctx.state === "suspended") void this.ctx.resume();
   }
 
-  /** Start het publiek-bed (lus van zacht gefilterde ruis met golving). */
   start(): void {
     if (!this.ctx || !this.master || this.started || this.disposed) return;
     this.started = true;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.makeCrowdBuffer(4);
-    src.loop = true;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 900;
-    filter.Q.value = 0.6;
-    const g = this.ctx.createGain();
-    g.gain.value = 0.0001;
-    src.connect(filter).connect(g).connect(this.master);
-    src.start();
-    this.crowdSrc = src;
-    this.crowdFilter = filter;
-    this.crowdGain = g;
-    // Fade-in van het publiek.
-    const t = this.ctx.currentTime;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.045, t + 1.5);
+    // Intensiteit-gain voor het bed (zwelt aan bij het doel).
+    this.crowdGain = this.ctx.createGain();
+    this.crowdGain.gain.value = 0.0001;
+    this.crowdGain.connect(this.master);
+    // Samples laden; bij gereed het bed starten. Synthese als terugval.
+    void this.load();
     // Inschakelen op de eerste gesture als de context nog geblokkeerd is.
     this.ensureRunning();
     if (this.ctx.state === "suspended") {
@@ -75,117 +78,115 @@ export class MatchAudio {
     }
   }
 
-  /** 0..1 publieksintensiteit: bal dichter bij een doel = meer geroezemoes. */
+  private async load(): Promise<void> {
+    if (!this.ctx) return;
+    const base = import.meta.env.BASE_URL || "/";
+    const files: Record<"ambience" | "cheer" | "whistle" | "kick", string> = {
+      ambience: `${base}audio/crowd-ambience.mp3`,
+      cheer: `${base}audio/crowd-cheer.mp3`,
+      whistle: `${base}audio/whistle.mp3`,
+      kick: `${base}audio/ball-kick.mp3`,
+    };
+    await Promise.all(
+      (Object.keys(files) as (keyof typeof files)[]).map(async (key) => {
+        try {
+          const res = await fetch(files[key]);
+          const arr = await res.arrayBuffer();
+          const buf = await this.ctx!.decodeAudioData(arr);
+          if (this.disposed) return;
+          this.buffers[key] = buf;
+          if (key === "ambience") this.startAmbience(buf);
+        } catch {
+          /* terugval op synthese */
+        }
+      }),
+    );
+    // Als het bed-sample niet kwam, gebruik een gesynthetiseerd bed.
+    if (!this.disposed && !this.crowdSrc) this.startSynthAmbience();
+  }
+
+  private startAmbience(buf: AudioBuffer): void {
+    if (!this.ctx || !this.crowdGain || this.crowdSrc) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(this.crowdGain);
+    src.start();
+    this.crowdSrc = src;
+    const t = this.ctx.currentTime;
+    this.crowdGain.gain.setValueAtTime(0.0001, t);
+    this.crowdGain.gain.linearRampToValueAtTime(0.25, t + 1.5);
+  }
+
+  /** 0..1 publieksintensiteit: bal dichter bij een doel = luider/meer rumoer. */
   setIntensity(x: number): void {
-    if (!this.ctx || !this.crowdGain || !this.crowdFilter) return;
+    if (!this.ctx || !this.crowdGain) return;
     const v = clamp01(x);
     if (Math.abs(v - this.lastIntensity) < 0.04) return; // throttle de automation
     this.lastIntensity = v;
     const t = this.ctx.currentTime;
-    this.crowdGain.gain.setTargetAtTime(0.035 + v * 0.08, t, 0.5);
-    this.crowdFilter.frequency.setTargetAtTime(700 + v * 1700, t, 0.6);
+    this.crowdGain.gain.setTargetAtTime(0.22 + v * 0.33, t, 0.5);
   }
 
-  /** Gejuich bij een doelpunt: een aanzwellende crowd-roar + tijdelijke boost. */
+  /** Gejuich bij een doelpunt (opbouw -> piek), met een tijdelijke bed-duck. */
   cheer(): void {
-    this.noiseSwell({ dur: 2.6, peak: 0.5, attack: 0.08, type: "lowpass", freq: 500, freqEnd: 2600, q: 0.5 });
-    if (this.ctx && this.crowdGain) {
-      const t = this.ctx.currentTime;
-      this.crowdGain.gain.cancelScheduledValues(t);
-      this.crowdGain.gain.setValueAtTime(0.13, t);
-      this.crowdGain.gain.linearRampToValueAtTime(0.22, t + 0.3);
-      this.crowdGain.gain.setTargetAtTime(0.06, t + 1.4, 1.2);
-      this.lastIntensity = -1; // laat setIntensity daarna weer overnemen
+    const buf = this.buffers.cheer;
+    if (!this.ctx || !this.master || !buf) {
+      this.synthCheer();
+      return;
     }
-  }
-
-  /** "Oooh" van het publiek bij een redding / afgeketst schot. */
-  ooh(): void {
-    this.noiseSwell({ dur: 0.85, peak: 0.24, attack: 0.12, type: "bandpass", freq: 520, freqEnd: 360, q: 1.3 });
-  }
-
-  /** Balcontact (pass/schot/tackle): korte percussieve tik; strength 0..1. */
-  kick(strength: number): void {
-    if (!this.ctx || !this.master) return;
     this.ensureRunning();
     const t = this.ctx.currentTime;
-    const s = clamp01(strength);
-    const peak = 0.1 + s * 0.3;
-    // Korte ruis-tik (de "klap").
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.makeNoiseBuffer(0.08);
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 900 + s * 800;
-    bp.Q.value = 0.9;
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(peak, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
-    src.connect(bp).connect(g).connect(this.master);
-    src.start(t);
-    src.stop(t + 0.09);
-    // Lage thump eronder.
-    const o = this.ctx.createOscillator();
-    o.type = "sine";
-    o.frequency.setValueAtTime(150, t);
-    o.frequency.exponentialRampToValueAtTime(70, t + 0.07);
-    const og = this.ctx.createGain();
-    og.gain.setValueAtTime(peak * 0.8, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-    o.connect(og).connect(this.master);
-    o.start(t);
-    o.stop(t + 0.1);
-  }
-
-  /** Scheidsrechtersfluit: twee licht ontstemde tonen met lichte trilling, een
-   *  vleugje "lucht" en een low-pass — warmer/zachter i.p.v. schel. */
-  whistle(long = false): void {
-    if (!this.ctx || !this.master) return;
-    this.ensureRunning();
-    const t = this.ctx.currentTime;
-    const dur = long ? 0.55 : 0.2;
-    // Zachtere envelope (langere aanzet -> geen klik) + lager volume.
+    const offset = 1.0; // sla de stilste opbouw over -> piek valt ~1.5s later
+    const dur = 7.5;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.06, t + 0.06);
-    g.gain.setValueAtTime(0.06, t + Math.max(0.06, dur - 0.08));
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    // Low-pass haalt de scherpte van de boventonen af.
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 3000;
-    lp.Q.value = 0.4;
-    g.connect(lp).connect(this.master);
-    // Lagere grondtoon (minder schel), twee licht ontstemde sinussen.
-    for (const f of [2250, 2275]) {
-      const o = this.ctx.createOscillator();
-      o.type = "sine";
-      o.frequency.value = f;
-      const lfo = this.ctx.createOscillator();
-      lfo.frequency.value = long ? 15 : 20;
-      const lfoG = this.ctx.createGain();
-      lfoG.gain.value = 32; // minder vibrato-uitslag
-      lfo.connect(lfoG).connect(o.frequency);
-      o.connect(g);
-      o.start(t);
-      o.stop(t + dur + 0.02);
-      lfo.start(t);
-      lfo.stop(t + dur + 0.02);
+    g.gain.linearRampToValueAtTime(0.85, t + 0.15);
+    g.gain.setValueAtTime(0.85, t + dur - 2.0);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(g).connect(this.master);
+    src.start(t, offset, dur + 0.1);
+    src.stop(t + dur + 0.15);
+    // Bed even terugnemen zodat het gejuich bovenligt, dan herstellen.
+    if (this.crowdGain) {
+      this.crowdGain.gain.cancelScheduledValues(t);
+      this.crowdGain.gain.setTargetAtTime(0.12, t, 0.4);
+      this.lastIntensity = -1;
     }
-    // Vleugje "lucht" (de erwt) maakt de toon minder puur en zachter.
-    const air = this.ctx.createBufferSource();
-    air.buffer = this.makeNoiseBuffer(dur + 0.05);
-    const ab = this.ctx.createBiquadFilter();
-    ab.type = "bandpass";
-    ab.frequency.value = 2200;
-    ab.Q.value = 1.4;
-    const ag = this.ctx.createGain();
-    ag.gain.setValueAtTime(0.0001, t);
-    ag.gain.exponentialRampToValueAtTime(0.013, t + 0.05);
-    ag.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    air.connect(ab).connect(ag).connect(this.master);
-    air.start(t);
-    air.stop(t + dur + 0.03);
+  }
+
+  /** "Oooh" bij een redding (gesynthetiseerd; geen sample beschikbaar). */
+  ooh(): void {
+    this.noiseSwell({ dur: 0.85, peak: 0.22, attack: 0.12, type: "bandpass", freq: 520, freqEnd: 360, q: 1.3 });
+  }
+
+  /** Balcontact (pass/schot/tackle): één los baltik-sample; strength 0..1. */
+  kick(strength: number): void {
+    const buf = this.buffers.kick;
+    if (!buf) {
+      this.synthKick(strength);
+      return;
+    }
+    const s = clamp01(strength);
+    const start = KICK_STARTS[Math.floor(Math.random() * KICK_STARTS.length)]!;
+    this.playSegment(buf, Math.max(0, start - 0.02), KICK_DUR, 0.4 + s * 0.45);
+  }
+
+  /** Scheidsrechtersfluit: één los fluit-sample (lang = twee blazen). */
+  whistle(long = false): void {
+    const buf = this.buffers.whistle;
+    if (!buf) {
+      this.synthWhistle(long);
+      return;
+    }
+    const seg = WHISTLES[Math.floor(Math.random() * WHISTLES.length)]!;
+    this.playSegment(buf, seg[0], seg[1], 0.6);
+    if (long) {
+      const seg2 = WHISTLES[Math.floor(Math.random() * WHISTLES.length)]!;
+      this.playSegment(buf, seg2[0], seg2[1], 0.6, seg[1] + 0.12);
+    }
   }
 
   dispose(): void {
@@ -205,7 +206,84 @@ export class MatchAudio {
     this.ctx = null;
   }
 
-  // --- synthese-helpers ---
+  // --- sample-playback ---
+
+  /** Speel een deel [offset, offset+dur] van een buffer met fade in/uit af. */
+  private playSegment(buf: AudioBuffer, offset: number, dur: number, gain: number, delay = 0): void {
+    if (!this.ctx || !this.master) return;
+    this.ensureRunning();
+    const t = this.ctx.currentTime + delay;
+    const fade = Math.min(0.02, dur * 0.2);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + fade);
+    g.gain.setValueAtTime(gain, t + Math.max(fade, dur - fade));
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(g).connect(this.master);
+    src.start(t, offset, dur + 0.05);
+    src.stop(t + dur + 0.06);
+  }
+
+  // --- synthese-terugval ---
+
+  private startSynthAmbience(): void {
+    if (!this.ctx || !this.crowdGain || this.crowdSrc) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.makeCrowdBuffer(4);
+    src.loop = true;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.value = 1100;
+    src.connect(filt).connect(this.crowdGain);
+    src.start();
+    this.crowdSrc = src;
+    const t = this.ctx.currentTime;
+    this.crowdGain.gain.setValueAtTime(0.0001, t);
+    this.crowdGain.gain.linearRampToValueAtTime(0.18, t + 1.5);
+  }
+
+  private synthCheer(): void {
+    this.noiseSwell({ dur: 2.6, peak: 0.5, attack: 0.08, type: "lowpass", freq: 500, freqEnd: 2600, q: 0.5 });
+  }
+
+  private synthKick(strength: number): void {
+    if (!this.ctx || !this.master) return;
+    this.ensureRunning();
+    const t = this.ctx.currentTime;
+    const s = clamp01(strength);
+    const peak = 0.1 + s * 0.3;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.makeNoiseBuffer(0.08);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 900 + s * 800;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(peak, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    src.connect(bp).connect(g).connect(this.master);
+    src.start(t);
+    src.stop(t + 0.09);
+  }
+
+  private synthWhistle(long: boolean): void {
+    if (!this.ctx || !this.master) return;
+    this.ensureRunning();
+    const t = this.ctx.currentTime;
+    const dur = long ? 0.55 : 0.2;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    g.connect(this.master);
+    const o = this.ctx.createOscillator();
+    o.type = "sine";
+    o.frequency.value = 2300;
+    o.connect(g);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
 
   private noiseSwell(opts: {
     dur: number;
@@ -244,7 +322,6 @@ export class MatchAudio {
     return buf;
   }
 
-  /** Publiek-bed: low-passed ruis met een langzame golving (publieksgolf). */
   private makeCrowdBuffer(seconds: number): AudioBuffer {
     const ctx = this.ctx!;
     const n = Math.floor(ctx.sampleRate * seconds);
@@ -253,8 +330,8 @@ export class MatchAudio {
     let last = 0;
     for (let i = 0; i < n; i++) {
       const white = Math.random() * 2 - 1;
-      last = last * 0.96 + white * 0.04; // leaky low-pass -> 'pink'-achtig
-      const env = 0.7 + 0.3 * Math.sin((i / n) * Math.PI * 2 * 3); // golving
+      last = last * 0.96 + white * 0.04;
+      const env = 0.7 + 0.3 * Math.sin((i / n) * Math.PI * 2 * 3);
       d[i] = last * env;
     }
     return buf;
