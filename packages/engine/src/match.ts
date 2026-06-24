@@ -46,6 +46,7 @@ const CROSSBAR_HEIGHT = 2.44;
 const WHISTLE_DELAY = 2.0; // s spel loopt door na uit/overtreding voor de hervatting
 const KEEPER_DISTRIBUTE_DELAY = 1.6; // s die de AI-keeper de bal vasthoudt voor uittrap
 const KEEPER_DIVE_VZ = 6; // verticale impuls (units/s) waarmee een keeperduik de lucht in springt
+const KEEPER_RECOVER = 0.7; // s die de keeper nodig heeft om na een duik weer overeind te komen
 const CORNER_SETUP_PAUSE = 3.2; // s extra stilstand bij een hoek zodat de ploegen zich opstellen
 const AIM_ROTATE_RATE = 1.8; // rad/s waarmee links/rechts het richt-pijltje draait
 const FREEKICK_DANGER_DIST = 30; // tot deze afstand van het doel: muurtje + opstelling
@@ -577,6 +578,13 @@ export class MatchSim {
     cmd.move = intent.move;
     cmd.sprint = intent.sprint;
 
+    // Een keeper loop je NIET met de pijltjes rond: hij wordt door de AI
+    // gepositioneerd. De human kan hem wél laten uittrappen/uitgooien (de actie).
+    if (p.isKeeper) {
+      cmd.move = { x: 0, y: 0 };
+      cmd.sprint = false;
+    }
+
     const isOwner = this.ball.ownerId === p.id;
 
     if (intent.actionReleased) {
@@ -669,6 +677,39 @@ export class MatchSim {
   }
 
   private applyCommand(p: PlayerEntity, cmd: PlayerCommand, dt: number): void {
+    // Duik afgelopen (timer op 0 of bal gevangen) -> overgang naar 'recover':
+    // de keeper komt neer en moet weer overeind komen voordat hij kan bewegen of
+    // opnieuw duiken.
+    if (p.isKeeper && p.state === "dive" && (p.stateTimer <= 0 || this.ball.ownerId === p.id)) {
+      p.state = "recover";
+      p.stateTimer = KEEPER_RECOVER;
+      p.vel.x = 0;
+      p.vel.y = 0;
+    }
+    // Recover: de keeper ligt nog/komt overeind. Geen beweging, geen nieuwe duik.
+    if (p.isKeeper && p.state === "recover") {
+      if (p.stateTimer > 0) {
+        p.vel.x = 0;
+        p.vel.y = 0;
+        // Rustig naar de grond zakken (de duik-arc landt) en overeind komen.
+        p.z = Math.max(0, (p.z ?? 0) - BALL.gravity * dt * 0.5);
+        if (p.z <= 0) {
+          p.z = 0;
+          p.vz = 0;
+        }
+        p.stateTimer = Math.max(0, p.stateTimer - dt);
+        // Kijkrichting: met bal het veld in, anders naar de bal.
+        if (this.ball.ownerId === p.id) {
+          const g = attackingGoal(p.side);
+          p.facing = angleOf({ x: g.x - p.pos.x, y: g.y - p.pos.y });
+        } else {
+          p.facing = angleOf({ x: this.ball.pos.x - p.pos.x, y: this.ball.pos.y - p.pos.y });
+        }
+        return;
+      }
+      p.state = "idle"; // hersteld -> weer normaal
+    }
+
     // Een duikende keeper: zijn duik-impuls draagt hem BALLISTISCH (constante
     // snelheid) naar het kruispunt — niet afremmen, anders komt hij niet op tijd.
     // Hij stuurt niet meer bij (een duik is een commitment). Daarna komt hij pas
@@ -1202,7 +1243,7 @@ export class MatchSim {
    * Een hard/ver geplaatst schot haalt hij zo niet (duiksnelheid is begrensd).
    */
   private tryKeeperDive(p: PlayerEntity): void {
-    if (p.state === "dive") return; // al aan het duiken
+    if (p.state === "dive" || p.state === "recover") return; // al aan het duiken/herstellen
     if (this.ball.ownerId === p.id) return;
     if (this.ball.z > 2.6) return;
     const goalX = p.side === "home" ? 0 : PITCH.width;
@@ -1256,7 +1297,7 @@ export class MatchSim {
    * aanvaller 'm omspelen.
    */
   private tryKeeperSmother(gk: PlayerEntity): void {
-    if (gk.state === "dive") return; // al onderweg
+    if (gk.state === "dive" || gk.state === "recover") return; // al onderweg/herstellen
     if (this.ball.ownerId === gk.id) return;
     const ownGoal = gk.side === "home" ? { x: 0, y: PITCH.height / 2 } : { x: PITCH.width, y: PITCH.height / 2 };
     const speed = len(this.ball.vel);
