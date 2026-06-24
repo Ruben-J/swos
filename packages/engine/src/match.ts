@@ -825,8 +825,16 @@ export class MatchSim {
     // een scherpe draai kan de bal losschieten (de speler verspeelt 'm).
     if (this.ball.ownerId === p.id && this.ball.sinceKick > 0.12) {
       const ctrl = p.stats.control / 100; // 0..1
-      const ahead = 0.7 + (1 - ctrl) * 0.7; // 0.7..1.4 u voor de voeten
-      const stick = 8 + ctrl * 10; // 8..18 catch-up: hoog = strak aan de voet
+      const moving = len(p.vel);
+      // CONSISTENTE basisafstand aan de voet (niet sterk per speler verschillend),
+      // met een ZICHTBAAR dribbelritme: touches duwen de bal heen en weer
+      // (dichterbij -> verderweg -> dichterbij). Sneller lopen = grotere, snellere
+      // touches; minder balcontrole = wat lossere uitslag.
+      const base = 0.95;
+      const amp = (moving > 1.2 ? 0.7 : 0.18) + (1 - ctrl) * 0.2;
+      const cadence = 7 + moving * 0.5; // touch-frequentie (rad/s)
+      const ahead = base + amp * 0.5 * Math.sin(this.matchSeconds * cadence);
+      const stick = 10 + ctrl * 8; // catch-up: hoog = strak aan de voet
       const fx = Math.cos(p.facing);
       const fy = Math.sin(p.facing);
       const targetX = p.pos.x + fx * ahead;
@@ -837,7 +845,7 @@ export class MatchSim {
       // Te ver achtergebleven (scherpe draai/versnelling) bij beperkte controle ->
       // de bal raakt los: ownership vrij, hij rolt door in de looprichting.
       const offDist = dist(this.ball.pos, p.pos);
-      const looseLimit = ahead + 0.7 + ctrl * 0.7;
+      const looseLimit = base + amp + 0.8 + ctrl * 0.6;
       const speed = len(p.vel);
       if (offDist > looseLimit && speed > 5) {
         this.ball.ownerId = null;
