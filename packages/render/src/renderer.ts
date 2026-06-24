@@ -74,9 +74,15 @@ export class MatchRenderer {
   // Stadion (grasrand + reclameborden + publiekstribunes): statisch, in de
   // world-laag zodat het mee draait/tilt met het veld. Eenmalig opgebouwd.
   private stadium = new Container();
-  // Crowd-tegels: hun texture wordt elk frame tegen de veldrotatie in gedraaid
-  // (tileRotation = -rot) zodat de toeschouwers RECHTOP op het scherm staan.
-  private crowdTiles: TilingSprite[] = [];
+  // Crowd-tegels: tegen de veldrotatie in gedraaid (tileRotation = -rot) zodat de
+  // toeschouwers RECHTOP staan. `dir` is de richting naar het veld (world); elk
+  // frame kiezen we het juiste kop-aanzicht (front/back/links/rechts) zodat de
+  // tribune naar het veld kijkt, ongeacht de helft.
+  private crowdTiles: {
+    tile: TilingSprite;
+    dir: { x: number; y: number };
+    tex: Record<"front" | "back" | "left" | "right", Texture>;
+  }[] = [];
   // Beveiliging + fotografen op de asfalt-track: pixel-sprites in de world-laag,
   // elk frame tegen rot in gedraaid zodat ze rechtop op het scherm staan.
   private trackFigures: Sprite[] = [];
@@ -176,33 +182,42 @@ export class MatchRenderer {
     this.stadium.addChild(base);
 
     // Publiekstribunes: thuispubliek rondom (overwegend thuiskleuren), met een
-    // uitvak in de uitclubkleuren. Mensjes ~op veldspeler-formaat.
-    const homeCrowd = this.makeCrowdTexture(
-      hexToNum(this.colors.home.primary),
-      hexToNum(this.colors.home.secondary),
-    );
-    const awayCrowd = this.makeCrowdTexture(
-      hexToNum(this.colors.away.primary),
-      hexToNum(this.colors.away.secondary),
-    );
+    // uitvak in de uitclubkleuren. Per tribune wordt het kop-aanzicht zo gekozen
+    // dat ze naar het veld kijken (front/back/links/rechts).
+    type ViewSet = Record<"front" | "back" | "left" | "right", Texture>;
+    const makeSet = (p: number, s: number): ViewSet => ({
+      front: this.makeCrowdTexture(p, s, "front"),
+      back: this.makeCrowdTexture(p, s, "back"),
+      left: this.makeCrowdTexture(p, s, "left"),
+      right: this.makeCrowdTexture(p, s, "right"),
+    });
+    const homeSet = makeSet(hexToNum(this.colors.home.primary), hexToNum(this.colors.home.secondary));
+    const awaySet = makeSet(hexToNum(this.colors.away.primary), hexToNum(this.colors.away.secondary));
     const ts = 1.0; // tegelschaal (toeschouwers ~speler-formaat)
     this.crowdTiles = [];
-    const addStand = (tex: Texture, x: number, y: number, w: number, h: number): void => {
-      const t = new TilingSprite({ texture: tex, width: w, height: h });
+    const addStand = (
+      set: ViewSet,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      dir: { x: number; y: number }, // richting naar het veld (world)
+    ): void => {
+      const t = new TilingSprite({ texture: set.front, width: w, height: h });
       t.tileScale.set(ts);
       t.position.set(x, y);
       this.stadium.addChild(t);
-      this.crowdTiles.push(t); // tileRotation wordt per frame tegen rot in gezet
+      this.crowdTiles.push({ tile: t, dir, tex: set });
     };
-    addStand(homeCrowd, -e3, -e3, W + 2 * e3, stand); // zijlijn y<0
-    addStand(homeCrowd, -e3, H + e2, W + 2 * e3, stand); // zijlijn y>H
-    addStand(homeCrowd, -e3, -e2, stand, H + 2 * e2); // achter doel x<0
-    addStand(homeCrowd, W + e2, -e2, stand, H + 2 * e2); // achter doel x>W
+    addStand(homeSet, -e3, -e3, W + 2 * e3, stand, { x: 0, y: 1 }); // zijlijn y<0 (veld onder)
+    addStand(homeSet, -e3, H + e2, W + 2 * e3, stand, { x: 0, y: -1 }); // zijlijn y>H (veld boven)
+    addStand(homeSet, -e3, -e2, stand, H + 2 * e2, { x: 1, y: 0 }); // achter doel x<0 (veld rechts)
+    addStand(homeSet, W + e2, -e2, stand, H + 2 * e2, { x: -1, y: 0 }); // achter doel x>W (veld links)
     // Uitvak: blok in de tribune achter het x=W-doel, aan de y=H-kant — valt na de
     // veld-rotatie (1e helft) rechtsboven in beeld.
     const awayLen = 0.42 * H;
     const awayY0 = H + e2 - awayLen; // grens tussen uit- en thuisvak
-    addStand(awayCrowd, W + e2, awayY0, stand, awayLen);
+    addStand(awaySet, W + e2, awayY0, stand, awayLen, { x: -1, y: 0 }); // achter x>W-doel
 
     // Tribune-trappen: betonnen gangpaden die radiaal door de tribune lopen
     // (van de voorwand naar achter), zodat het publiek in vakken opgedeeld is.
@@ -362,7 +377,11 @@ export class MatchRenderer {
    *  sjaal, soms opgestoken armen of een zwaaiende vlag. `primary` zaait ook de
    *  variatie zodat thuis/uit verschillen. De texture wordt in de renderer tegen
    *  de veldrotatie in gedraaid zodat de mensen rechtop staan. */
-  private makeCrowdTexture(primary: number, secondary: number): Texture {
+  private makeCrowdTexture(
+    primary: number,
+    secondary: number,
+    view: "front" | "back" | "left" | "right",
+  ): Texture {
     const cols = 8;
     const rows = 9;
     const cw = 14; // celbreedte
@@ -409,9 +428,21 @@ export class MatchRenderer {
         px(cx, top + 6, 12, 1, "rgba(255,255,255,0.12)"); // schouder-highlight
         // Sjaal: gekleurde band onder de hals (vaak in de andere teamkleur).
         if (scarf) px(cx, top + 6, 12, 2, rnd() < 0.5 ? team2 : team);
-        // Hoofd: haar + gezicht.
-        px(cx + 3, top, 6, 4, hair);
-        px(cx + 4, top + 3, 4, 3, skin);
+        // Hoofd, per kijkrichting — zo kijkt elke tribune naar het veld.
+        if (view === "back") {
+          px(cx + 3, top, 6, 6, hair); // achterhoofd: alleen haar (kijkt weg)
+        } else if (view === "left") {
+          px(cx + 3, top, 6, 3, hair);
+          px(cx + 6, top + 3, 3, 3, hair); // achterhoofd rechts
+          px(cx + 3, top + 3, 3, 3, skin); // gezicht naar links
+        } else if (view === "right") {
+          px(cx + 3, top, 6, 3, hair);
+          px(cx + 3, top + 3, 3, 3, hair); // achterhoofd links
+          px(cx + 6, top + 3, 3, 3, skin); // gezicht naar rechts
+        } else {
+          px(cx + 3, top, 6, 3, hair); // pony
+          px(cx + 4, top + 3, 4, 3, skin); // gezicht naar de kijker
+        }
         // Armen: opgestoken (juichend) of langs het lijf.
         if (armsUp) {
           px(cx, top + 1, 2, 6, skin); // linkerarm omhoog
@@ -922,7 +953,16 @@ export class MatchRenderer {
     this.world.rotation = rot;
     this.world.scale.set(scaleX, scaleY);
     // Crowd-texture + track-figuren tegen de veldrotatie in draaien -> rechtop.
-    for (const t of this.crowdTiles) t.tileRotation = -rot;
+    // Per tribune kiezen we het kop-aanzicht zodat ze naar het veld kijken:
+    // de veld-richting (world) op het scherm bepaalt front/back/links/rechts.
+    for (const c of this.crowdTiles) {
+      const sx = c.dir.x * cos - c.dir.y * sin; // veld-richting -> scherm
+      const sy = c.dir.x * sin + c.dir.y * cos;
+      const view =
+        Math.abs(sy) >= Math.abs(sx) ? (sy > 0 ? "front" : "back") : sx > 0 ? "right" : "left";
+      c.tile.texture = c.tex[view];
+      c.tile.tileRotation = -rot;
+    }
     for (const s of this.trackFigures) s.rotation = -rot;
     const vx = view.center.x * u * scaleX;
     const vy = view.center.y * u * scaleY;
