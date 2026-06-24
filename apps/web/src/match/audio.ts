@@ -115,7 +115,7 @@ export class MatchAudio {
     this.crowdSrc = src;
     const t = this.ctx.currentTime;
     this.crowdGain.gain.setValueAtTime(0.0001, t);
-    this.crowdGain.gain.linearRampToValueAtTime(0.24, t + 1.5);
+    this.crowdGain.gain.linearRampToValueAtTime(0.5, t + 1.5);
   }
 
   /** 0..1 publieksintensiteit: bal dichter bij een doel = luider/meer rumoer. */
@@ -125,8 +125,8 @@ export class MatchAudio {
     if (Math.abs(v - this.lastIntensity) < 0.04) return; // throttle de automation
     this.lastIntensity = v;
     const t = this.ctx.currentTime;
-    // Basis (middenveld) al duidelijk hoorbaar, kleinere zwelling naar het doel.
-    this.crowdGain.gain.setTargetAtTime(0.24 + v * 0.16, t, 0.5);
+    // Stevig hoorbaar bed; gentere zwelling naar het doel.
+    this.crowdGain.gain.setTargetAtTime(0.5 + v * 0.14, t, 0.5);
   }
 
   /** Gejuich bij een doelpunt (opbouw -> piek), met een tijdelijke bed-duck. */
@@ -140,22 +140,18 @@ export class MatchAudio {
     const t = this.ctx.currentTime;
     const offset = 1.0; // sla de stilste opbouw over -> piek valt ~1.5s later
     const dur = 7.5;
+    // Speelt TEGELIJK met het stadion-bed (geen duck): het gejuich ligt er als
+    // extra laag bovenop, op een bescheiden niveau zodat het niet overheerst.
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.85, t + 0.15);
-    g.gain.setValueAtTime(0.85, t + dur - 2.0);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.15);
+    g.gain.setValueAtTime(0.4, t + dur - 2.0);
     g.gain.linearRampToValueAtTime(0.0001, t + dur);
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     src.connect(g).connect(this.master);
     src.start(t, offset, dur + 0.1);
     src.stop(t + dur + 0.15);
-    // Bed even terugnemen zodat het gejuich bovenligt, dan herstellen.
-    if (this.crowdGain) {
-      this.crowdGain.gain.cancelScheduledValues(t);
-      this.crowdGain.gain.setTargetAtTime(0.06, t, 0.4);
-      this.lastIntensity = -1;
-    }
   }
 
   /** "Oooh" bij een redding (gesynthetiseerd; geen sample beschikbaar). */

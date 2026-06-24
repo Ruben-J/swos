@@ -34,6 +34,7 @@ export class MatchController {
   // Vorige waarden voor event-detectie (goal/redding/fluit/balcontact).
   private prevGoalSeq = 0;
   private prevSaveSeq = 0;
+  private prevRestartSeq = 0;
   private prevPhase = "";
   private prevBallSpeed = 0;
 
@@ -163,6 +164,11 @@ export class MatchController {
     if (snap.saveSeq !== this.prevSaveSeq) {
       this.prevSaveSeq = snap.saveSeq;
       a.ooh();
+    }
+    // Hervatting mag genomen worden (aftrap/vrije trap/ingooi) -> fluit "verder".
+    if (snap.restartReadySeq !== this.prevRestartSeq) {
+      this.prevRestartSeq = snap.restartReadySeq;
+      a.whistle(false);
     }
     // Fasewissel -> fluit (overtreding/uit kort, rust/einde lang).
     if (snap.phase !== this.prevPhase) {

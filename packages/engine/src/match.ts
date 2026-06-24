@@ -114,6 +114,8 @@ export interface MatchSnapshot {
   goalImpact: GoalImpact | null;
   /** Loopt op bij elke keeperredding op een schot (voor audio "oooh"). */
   saveSeq: number;
+  /** Loopt op zodra een hervatting genomen mag worden (voor de scheidsfluit). */
+  restartReadySeq: number;
 }
 
 export interface GoalEvent {
@@ -160,6 +162,9 @@ export class MatchSim {
   private goalImpactSeq = 0;
   /** Loopt op bij elke keeperredding op een schot richting doel (voor audio). */
   private saveSeq = 0;
+  /** Loopt op zodra een hervatting genomen mag worden (verplichte stilstand
+   *  voorbij): aftrap/vrije trap/ingooi enz. -> scheidsrechtersfluit. */
+  private restartReadySeq = 0;
 
   private humanSide: Side | null;
   activeId: Record<Side, string | null> = { home: null, away: null };
@@ -1017,7 +1022,11 @@ export class MatchSim {
    * de bal speelt (mens: actieknop; AI: na de verplichte stilstand).
    */
   private stepRestart(dt: number, humanIntent: PlayerIntent): void {
+    // Verplichte stilstand telt af; op het moment dat hij op nul komt mag de
+    // hervatting genomen worden -> signaal voor de scheidsrechtersfluit ("verder").
+    const wasNotReady = this.restartReady > 0;
     this.restartReady = Math.max(0, this.restartReady - dt);
+    if (wasNotReady && this.restartReady <= 0) this.restartReadySeq++;
     const taking = this.restartTakingSide;
     if (!taking) {
       this.phase = "play";
@@ -2268,6 +2277,7 @@ export class MatchSim {
       goals: this.goals.map((g) => ({ ...g })),
       goalImpact: this.goalImpact ? { ...this.goalImpact } : null,
       saveSeq: this.saveSeq,
+      restartReadySeq: this.restartReadySeq,
     };
   }
 }
