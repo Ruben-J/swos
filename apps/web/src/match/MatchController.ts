@@ -196,6 +196,18 @@ export class MatchController {
     this.loop.stop();
   }
 
+  /** Pauzeer de wedstrijd: bevries de loop en demp de audio. */
+  pause(): void {
+    this.loop.stop();
+    this.audio?.setSuspended(true);
+  }
+
+  /** Hervat na een pauze. */
+  resume(): void {
+    this.audio?.setSuspended(false);
+    this.loop.start();
+  }
+
   destroy(): void {
     this.loop.stop();
     this.input.detach();

@@ -186,6 +186,16 @@ export class MatchAudio {
     }
   }
 
+  /** Pauzeer/hervat alle audio (bij wedstrijd-pauze). */
+  setSuspended(suspended: boolean): void {
+    if (!this.ctx) return;
+    if (suspended) {
+      if (this.ctx.state === "running") void this.ctx.suspend();
+    } else if (this.ctx.state === "suspended") {
+      void this.ctx.resume();
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.resumeHandler) {

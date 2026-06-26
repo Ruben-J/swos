@@ -23,6 +23,8 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [snap, setSnap] = useState<MatchSnapshot | null>(null);
   const finishedRef = useRef(false);
+  const controllerRef = useRef<MatchController | null>(null);
+  const [paused, setPaused] = useState(false);
 
   // Tijdens de opkomst (spelers lopen het veld op) tonen we beide opstellingen.
   const inWalkout = snap?.phase === "walkout";
@@ -35,19 +37,30 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
     }
   }, [snap, onFinish]);
 
-  // De wedstrijd verlaten kan met Escape (er is geen zichtbare terugknop meer).
+  const resume = (): void => {
+    controllerRef.current?.resume();
+    setPaused(false);
+  };
+
+  // Escape pauzeert de wedstrijd (menu); in het menu hervat Escape weer.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onExit();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setPaused((p) => {
+        const next = !p;
+        if (next) controllerRef.current?.pause();
+        else controllerRef.current?.resume();
+        return next;
+      });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onExit]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let controller: MatchController | null = null;
     let disposed = false;
 
     MatchController.create(canvas, config, setSnap).then((c) => {
@@ -55,13 +68,14 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
         c.destroy();
         return;
       }
-      controller = c;
+      controllerRef.current = c;
       c.start();
     });
 
     return () => {
       disposed = true;
-      controller?.destroy();
+      controllerRef.current?.destroy();
+      controllerRef.current = null;
     };
   }, [config]);
 
@@ -119,6 +133,20 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
         />
 
         {snap && snap.phase !== "walkout" && <Radar snap={snap} config={config} />}
+
+        {paused && (
+          <div className="pause-overlay">
+            <div className="pause-menu">
+              <h2>Pauze</h2>
+              <button className="pause-btn primary" onClick={resume}>
+                Doorgaan
+              </button>
+              <button className="pause-btn danger" onClick={onExit}>
+                Hoofdmenu
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

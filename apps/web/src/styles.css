@@ -392,6 +392,49 @@ button.btn:disabled {
   overflow: hidden;
 }
 
+/* --- Pauze-menu --- */
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 9, 12, 0.62);
+  backdrop-filter: blur(2px);
+}
+.pause-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 320px;
+  max-width: 92vw;
+  padding: 1.4rem;
+  border-radius: 14px;
+  background: rgba(12, 16, 20, 0.96);
+  border: 1px solid #1f2a1c;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+}
+.pause-menu h2 {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+}
+.pause-btn {
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid #243019;
+  background: #121810;
+  color: var(--text);
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+.pause-btn:hover:not(:disabled) { border-color: var(--accent); background: #16241a; }
+.pause-btn.primary { background: var(--accent-2, #4ade80); color: #07140b; border-color: transparent; font-weight: 700; }
+.pause-btn.danger:hover { border-color: #b3402e; background: #241312; }
+.pause-btn:disabled { opacity: 0.5; cursor: default; }
+
 .pitch-wrap canvas {
   display: block;
   position: absolute;
