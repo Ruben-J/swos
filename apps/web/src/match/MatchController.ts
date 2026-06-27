@@ -4,8 +4,11 @@ import {
   KeyboardInput,
   MatchSim,
   type MatchConfig,
+  type MatchPlayerSetup,
   type MatchSnapshot,
   type PlayerIntent,
+  type Side,
+  type TeamTacticsConfig,
 } from "@pitch/engine";
 import { MatchRenderer } from "@pitch/render";
 import { PITCH } from "@pitch/shared";
@@ -28,6 +31,7 @@ export class MatchController {
   private loop: GameLoop;
   private camera: Camera;
   private input: KeyboardInput;
+  private humanSide: Side | null = null;
   private hudListener: HudListener | null = null;
   private hudAccumulator = 0;
   private audio: MatchAudio | null = null;
@@ -57,6 +61,7 @@ export class MatchController {
     const camera = new Camera(70, 46);
     const input = new KeyboardInput();
     const controller = new MatchController(sim, camera, input);
+    controller.humanSide = config.humanSide;
     controller.hudListener = hud;
     controller.renderer = await MatchRenderer.create(canvas, {
       home: { primary: config.home.colorPrimary, secondary: config.home.colorSecondary, pattern: config.home.pattern },
@@ -206,6 +211,21 @@ export class MatchController {
   resume(): void {
     this.audio?.setSuspended(false);
     this.loop.start();
+  }
+
+  /** Live wissel voor de door de mens bestuurde ploeg. Duwt daarna een verse
+   *  snapshot naar de HUD, zodat de opstelling tijdens de pauze (loop bevroren)
+   *  meteen bijwerkt. */
+  substituteHuman(outId: string, inSetup: MatchPlayerSetup): boolean {
+    if (!this.humanSide) return false;
+    const ok = this.sim.substitute(this.humanSide, outId, inSetup);
+    if (ok) this.hudListener?.(this.sim.snapshot());
+    return ok;
+  }
+
+  /** Live tactiek-aanpassing voor de door de mens bestuurde ploeg. */
+  setHumanTactics(tactics: TeamTacticsConfig): void {
+    if (this.humanSide) this.sim.setTactics(this.humanSide, tactics);
   }
 
   destroy(): void {

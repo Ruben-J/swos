@@ -40,6 +40,7 @@ import {
   type Position,
   type Side,
   type TeamSetup,
+  type TeamTacticsConfig,
 } from "./types.js";
 
 const CROSSBAR_HEIGHT = 2.44;
@@ -151,6 +152,42 @@ export class MatchSim {
   /** Huidige helft (1/2) — voor de presentatie-rotatie van het veld. */
   get currentHalf(): number {
     return this.half;
+  }
+
+  /** Pas de teamtactiek live aan (sliders lineHeight/press/width/tempo). De AI
+   *  leest deze elke tick, dus het effect is direct. */
+  setTactics(side: Side, tactics: TeamTacticsConfig): void {
+    this.tactics[side] = {
+      lineHeight: tactics.lineHeight,
+      press: tactics.press,
+      width: tactics.width,
+      tempo: tactics.tempo,
+    };
+  }
+
+  /** Wissel een speler in: de inkomende speler neemt de plek (positie/anker) van
+   *  de uitgaande over; alleen identiteit en attributen veranderen. */
+  substitute(side: Side, outId: string, inSetup: MatchPlayerSetup): boolean {
+    const p = this.players.find((pl) => pl.side === side && pl.id === outId);
+    if (!p) return false;
+    if (this.ball.ownerId === outId) {
+      this.ball.ownerId = null;
+      this.ballProtectedFor = null;
+    }
+    p.id = inSetup.id;
+    p.shirtNumber = inSetup.shirtNumber;
+    p.firstName = inSetup.firstName;
+    p.lastName = inSetup.lastName;
+    p.hairColor = inSetup.hairColor;
+    p.skinColor = inSetup.skinColor;
+    p.stats = inSetup.stats;
+    p.state = "idle";
+    p.stateTimer = 0;
+    p.vel = { x: 0, y: 0 };
+    p.stamina = 1;
+    p.exhausted = false;
+    if (this.activeId[side] === outId) this.activeId[side] = inSetup.id;
+    return true;
   }
   private kickoffSide: Side = "home";
   private lastConcededSide: Side | null = null;

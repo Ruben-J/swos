@@ -435,6 +435,53 @@ button.btn:disabled {
 .pause-btn.danger:hover { border-color: #b3402e; background: #241312; }
 .pause-btn:disabled { opacity: 0.5; cursor: default; }
 
+/* Pauze: wissels & tactiek */
+.pause-team {
+  width: 760px;
+  max-width: 94vw;
+  max-height: 88vh;
+  overflow: auto;
+  padding: 1.2rem 1.4rem;
+  border-radius: 14px;
+  background: rgba(12, 16, 20, 0.97);
+  border: 1px solid #1f2a1c;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+}
+.pt-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.9rem; }
+.pt-head h2 { margin: 0; font-family: var(--font-display); font-size: 1.4rem; flex: 1; }
+.pt-back { flex: none; padding: 0.4rem 0.7rem; font-size: 0.9rem; }
+.pt-subcount { color: var(--muted); font-size: 0.85rem; }
+.pt-cols { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 1rem; }
+.pt-col h3 { margin: 0 0 0.5rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-2); }
+.pt-list { list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+.pt-empty { color: var(--muted); font-size: 0.85rem; padding: 0.4rem; }
+.pt-player {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1.6rem 2.2rem 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #1a2117;
+  background: #10140e;
+  color: var(--text);
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+.pt-player:hover:not(:disabled) { border-color: var(--accent); }
+.pt-player.sel { border-color: var(--accent); background: #1c2c1a; }
+.pt-player:disabled { opacity: 0.45; cursor: default; }
+.pt-num { color: var(--muted); text-align: center; }
+.pt-pos { color: var(--accent-2); font-weight: 600; }
+.pt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-tactics { display: flex; flex-direction: column; gap: 0.7rem; }
+.pt-slider { display: flex; flex-direction: column; gap: 0.15rem; }
+.pt-slider-label { font-size: 0.85rem; }
+.pt-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+.pt-slider-ends { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--muted); }
+
 .pitch-wrap canvas {
   display: block;
   position: absolute;

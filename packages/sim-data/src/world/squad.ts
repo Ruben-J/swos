@@ -335,6 +335,26 @@ export function toTeamSetup(
     };
   });
 
+  // Bank: de beste resterende spelers (niet in de basis), voor wissels.
+  const startingIds = new Set(chosen.map((c) => c.player.id));
+  const benchPlayers: MatchPlayerSetup[] = [...players]
+    .filter((p) => !startingIds.has(p.id))
+    .sort((a, b) => playerOverall(b) - playerOverall(a))
+    .slice(0, 7)
+    .map((player, i) => {
+      const look = appearance(player.id);
+      return {
+        id: player.id,
+        shirtNumber: 12 + i,
+        position: player.preferredPositions[0] ?? "CM",
+        firstName: player.firstName,
+        lastName: player.lastName,
+        hairColor: look.hair,
+        skinColor: look.skin,
+        stats: toMatchStats(player),
+      };
+    });
+
   const kit = kitFor(team, kitSide);
   return {
     id: team.id,
@@ -344,6 +364,7 @@ export function toTeamSetup(
     colorSecondary: kit.secondary,
     pattern: kit.pattern,
     players: setupPlayers,
+    bench: benchPlayers,
     formationName,
     tactics: override?.shape
       ? {

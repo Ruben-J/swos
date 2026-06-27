@@ -144,6 +144,8 @@ export interface TeamSetup {
   /** Shirtpatroon: "plain" | "stripes" | "centre". */
   pattern?: "plain" | "stripes" | "centre";
   players: MatchPlayerSetup[];
+  /** Reservespelers (bank) voor wissels tijdens de wedstrijd. */
+  bench?: MatchPlayerSetup[];
   /** Optionele tactische instelling; valt terug op DEFAULT_TACTICS. */
   tactics?: TeamTacticsConfig;
   formationName?: string;

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { MatchConfig, MatchSnapshot, MatchSnapshotPlayer, Side } from "@pitch/engine";
+import type {
+  MatchConfig,
+  MatchPlayerSetup,
+  MatchSnapshot,
+  MatchSnapshotPlayer,
+  Side,
+  TeamTacticsConfig,
+} from "@pitch/engine";
 import { RULES } from "@pitch/shared";
 import { MatchController } from "../match/MatchController.js";
 import { ClubCrest } from "../components/ClubCrest";
@@ -25,6 +32,11 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
   const finishedRef = useRef(false);
   const controllerRef = useRef<MatchController | null>(null);
   const [paused, setPaused] = useState(false);
+  const [pauseView, setPauseView] = useState<"menu" | "team">("menu");
+  const humanCfg = config.humanSide === "away" ? config.away : config.home;
+  const [bench, setBench] = useState<MatchPlayerSetup[]>(() => humanCfg.bench ?? []);
+  const [subCount, setSubCount] = useState(0);
+  const [tactics, setTactics] = useState<TeamTacticsConfig>(() => humanCfg.tactics ?? DEFAULT_TACTICS_UI);
 
   // Tijdens de opkomst (spelers lopen het veld op) tonen we beide opstellingen.
   const inWalkout = snap?.phase === "walkout";
@@ -40,6 +52,19 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
   const resume = (): void => {
     controllerRef.current?.resume();
     setPaused(false);
+    setPauseView("menu");
+  };
+
+  const doSub = (outId: string, inP: MatchPlayerSetup): void => {
+    if (subCount >= RULES.maxSubstitutions) return;
+    if (controllerRef.current?.substituteHuman(outId, inP)) {
+      setBench((b) => b.filter((p) => p.id !== inP.id));
+      setSubCount((c) => c + 1);
+    }
+  };
+  const doTactics = (t: TeamTacticsConfig): void => {
+    setTactics(t);
+    controllerRef.current?.setHumanTactics(t);
   };
 
   // Escape pauzeert de wedstrijd (menu); in het menu hervat Escape weer.
@@ -53,6 +78,7 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
         else controllerRef.current?.resume();
         return next;
       });
+      setPauseView("menu");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -88,6 +114,8 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
 
   const homeActive = activeOf(snap, "home");
   const awayActive = activeOf(snap, "away");
+
+  const humanPlayers = snap ? snap.players.filter((p) => p.side === config.humanSide) : [];
 
   return (
     <div className="match-screen">
@@ -136,17 +164,147 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
 
         {paused && (
           <div className="pause-overlay">
-            <div className="pause-menu">
-              <h2>Pauze</h2>
-              <button className="pause-btn primary" onClick={resume}>
-                Doorgaan
-              </button>
-              <button className="pause-btn danger" onClick={onExit}>
-                Hoofdmenu
-              </button>
-            </div>
+            {pauseView === "menu" ? (
+              <div className="pause-menu">
+                <h2>Pauze</h2>
+                <button className="pause-btn primary" onClick={resume}>
+                  Doorgaan
+                </button>
+                {config.humanSide && (
+                  <button className="pause-btn" onClick={() => setPauseView("team")}>
+                    Wissels &amp; tactiek
+                  </button>
+                )}
+                <button className="pause-btn danger" onClick={onExit}>
+                  Hoofdmenu
+                </button>
+              </div>
+            ) : (
+              <TeamPanel
+                players={humanPlayers}
+                bench={bench}
+                subCount={subCount}
+                tactics={tactics}
+                onSub={doSub}
+                onTactics={doTactics}
+                onBack={() => setPauseView("menu")}
+              />
+            )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_TACTICS_UI: TeamTacticsConfig = { lineHeight: 0.5, press: 0.6, width: 0.55, tempo: 0.6 };
+
+const TACTIC_SLIDERS: { key: keyof TeamTacticsConfig; label: string; lo: string; hi: string }[] = [
+  { key: "lineHeight", label: "Verdedigingslijn", lo: "Diep", hi: "Hoog" },
+  { key: "press", label: "Pressing", lo: "Afwachtend", hi: "Jagen" },
+  { key: "width", label: "Breedte", lo: "Smal", hi: "Breed" },
+  { key: "tempo", label: "Tempo", lo: "Geduldig", hi: "Direct" },
+];
+
+/** Pauze-paneel: wissels (basis ↔ bank) en tactiek-sliders, live toegepast. */
+function TeamPanel({
+  players,
+  bench,
+  subCount,
+  tactics,
+  onSub,
+  onTactics,
+  onBack,
+}: {
+  players: MatchSnapshotPlayer[];
+  bench: MatchPlayerSetup[];
+  subCount: number;
+  tactics: TeamTacticsConfig;
+  onSub: (outId: string, inP: MatchPlayerSetup) => void;
+  onTactics: (t: TeamTacticsConfig) => void;
+  onBack: () => void;
+}) {
+  const [selOut, setSelOut] = useState<string | null>(null);
+  const maxSubs = RULES.maxSubstitutions;
+  const subsLeft = subCount < maxSubs;
+
+  return (
+    <div className="pause-team">
+      <div className="pt-head">
+        <button className="pause-btn pt-back" onClick={onBack}>
+          ← Terug
+        </button>
+        <h2>Wissels &amp; tactiek</h2>
+        <span className="pt-subcount">Wissels {subCount}/{maxSubs}</span>
+      </div>
+
+      <div className="pt-cols">
+        <section className="pt-col">
+          <h3>Op het veld</h3>
+          <ul className="pt-list">
+            {players.map((p) => (
+              <li key={p.id}>
+                <button
+                  className={`pt-player${selOut === p.id ? " sel" : ""}`}
+                  onClick={() => setSelOut((s) => (s === p.id ? null : p.id))}
+                  disabled={!subsLeft}
+                >
+                  <span className="pt-num">{p.shirtNumber}</span>
+                  <span className="pt-pos">{p.position}</span>
+                  <span className="pt-name">
+                    {p.firstName.charAt(0)}. {p.lastName}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="pt-col">
+          <h3>{selOut ? "Bank — kies invaller" : "Bank"}</h3>
+          <ul className="pt-list">
+            {bench.length === 0 && <li className="pt-empty">Geen reserves meer.</li>}
+            {bench.map((p) => (
+              <li key={p.id}>
+                <button
+                  className="pt-player"
+                  disabled={!selOut || !subsLeft}
+                  onClick={() => {
+                    if (selOut) onSub(selOut, p);
+                    setSelOut(null);
+                  }}
+                >
+                  <span className="pt-num">{p.shirtNumber}</span>
+                  <span className="pt-pos">{p.position}</span>
+                  <span className="pt-name">
+                    {p.firstName.charAt(0)}. {p.lastName}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="pt-col pt-tactics">
+          <h3>Tactiek</h3>
+          {TACTIC_SLIDERS.map((s) => (
+            <div key={s.key} className="pt-slider">
+              <span className="pt-slider-label">{s.label}</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={tactics[s.key]}
+                onChange={(e) => onTactics({ ...tactics, [s.key]: Number(e.target.value) })}
+              />
+              <div className="pt-slider-ends">
+                <span>{s.lo}</span>
+                <span>{s.hi}</span>
+              </div>
+            </div>
+          ))}
+        </section>
       </div>
     </div>
   );
