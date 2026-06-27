@@ -881,7 +881,6 @@ export class MatchRenderer {
   private ensureOfficials(): void {
     if (this.officials.length) return;
     const cx = PITCH.width / 2;
-    const cy = PITCH.height / 2;
     const color = this.pickOfficialColor();
     const look: PersonLook = {
       shirt: color,
