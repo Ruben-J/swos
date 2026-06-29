@@ -19,7 +19,7 @@ import {
 } from "../world/squad.js";
 import { quickSimulate, type QuickTilt } from "./quicksim.js";
 import { computeStandings } from "./standings.js";
-import { processMatchdayEvents } from "./events.js";
+import { bookRed, bookYellow, processMatchdayEvents, type MatchCardResult } from "./events.js";
 import { processKnockouts } from "./knockout.js";
 import { processTraining } from "./training.js";
 import { processAiTransfers } from "./aitransfers.js";
@@ -232,15 +232,42 @@ function pickWeighted(rng: Rng, items: Player[], weight: (p: Player) => number):
  * Ken de doelpunten van een gespeelde wedstrijd toe aan spelers, zodat er een
  * topscorers-/assistlijst per seizoen ontstaat. Goedkoop: een paar gewogen
  * trekkingen per goal (op finishing/positie), met ~65% kans op een assist van
- * een teamgenoot. Geldt voor álle wedstrijden (ook gesimuleerde competities).
+ * een teamgenoot. Voor de live gespeelde wedstrijd worden de ECHTE makers
+ * (`real`) gebruikt i.p.v. een gewogen trekking; assists blijven statistisch
+ * (de engine houdt geen assists bij). Eigen doelpunten zitten niet in `real`.
  */
-function attributeScorers(rng: Rng, save: CareerSave, match: Match): void {
+function attributeScorers(
+  rng: Rng,
+  save: CareerSave,
+  match: Match,
+  real?: { home: UUID[]; away: UUID[] },
+): void {
   const players = save.worldState.players;
   const scorers: UUID[] = [];
   const assists: UUID[] = [];
-  const attribute = (teamId: UUID, goals: number): void => {
+  const addAssist = (squad: Player[], scorerId: UUID): void => {
+    if (!rng.chance(0.65)) return;
+    const mates = squad.filter((p) => p.id !== scorerId);
+    const assister = pickWeighted(
+      rng,
+      mates,
+      (p) => posWeight(p, POS_ASSIST_WEIGHT) * (0.5 + (p.attributes.passing + p.attributes.flair) / 200),
+    );
+    if (assister) assists.push(assister.id);
+  };
+  const attribute = (teamId: UUID, goals: number, realIds?: UUID[]): void => {
     const squad = players.filter((p) => p.teamId === teamId);
     if (squad.length === 0) return;
+    if (realIds) {
+      // Echte makers uit de gespeelde wedstrijd (eigen doelpunten zitten er niet
+      // in, dus mogelijk minder dan `goals` — die blijven dan zonder maker).
+      for (const id of realIds) {
+        if (!squad.some((p) => p.id === id)) continue;
+        scorers.push(id);
+        addAssist(squad, id);
+      }
+      return;
+    }
     for (let g = 0; g < goals; g++) {
       const scorer = pickWeighted(
         rng,
@@ -249,21 +276,87 @@ function attributeScorers(rng: Rng, save: CareerSave, match: Match): void {
       );
       if (!scorer) continue;
       scorers.push(scorer.id);
-      if (rng.chance(0.65)) {
-        const mates = squad.filter((p) => p.id !== scorer.id);
-        const assister = pickWeighted(
-          rng,
-          mates,
-          (p) => posWeight(p, POS_ASSIST_WEIGHT) * (0.5 + (p.attributes.passing + p.attributes.flair) / 200),
-        );
-        if (assister) assists.push(assister.id);
-      }
+      addAssist(squad, scorer.id);
     }
   };
-  attribute(match.homeTeamId, match.score.home);
-  attribute(match.awayTeamId, match.score.away);
+  attribute(match.homeTeamId, match.score.home, real?.home);
+  attribute(match.awayTeamId, match.score.away, real?.away);
   match.goalScorers = scorers;
   match.goalAssists = assists;
+}
+
+// Wie pakt een kaart: verdedigers/controleurs vaker dan aanvallers.
+const POS_FOUL_WEIGHT: Record<Position, number> = {
+  GK: 0.1, CB: 1.5, RB: 1.2, LB: 1.2, DM: 1.6, CM: 1.0, AM: 0.7, RW: 0.6, LW: 0.6, ST: 0.7,
+};
+
+/** Kaart-aanleg van een speler: agressie + positie (verdedigend = vaker). */
+function foulWeight(p: Player): number {
+  const aggro = 0.5 + (p.attributes.aggression ?? 50) / 100; // 0.5..1.5
+  return posWeight(p, POS_FOUL_WEIGHT) * aggro;
+}
+
+/**
+ * Genereer kaarten voor een gesimuleerde (niet live gespeelde) ploeg en boek de
+ * gevolgen (gele accumulatie -> schorsing, rood -> schorsing). `played` zijn de
+ * spelers die daadwerkelijk meededen (fit en niet geschorst). Goedkoop: een paar
+ * gewogen trekkingen per wedstrijd.
+ */
+function generateQuickSimCards(rng: Rng, played: Player[]): void {
+  if (played.length === 0) return;
+  // Aantal gele kaarten deze wedstrijd (~1.5 gemiddeld).
+  const nY = rng.chance(0.15) ? 3 : rng.chance(0.4) ? 2 : rng.chance(0.7) ? 1 : 0;
+  for (let i = 0; i < nY; i++) {
+    const p = pickWeighted(rng, played, foulWeight);
+    if (p) bookYellow(p);
+  }
+  // Zeldzame directe rode kaart.
+  if (rng.chance(0.03)) {
+    const p = pickWeighted(rng, played, foulWeight);
+    if (p) bookRed(p);
+  }
+}
+
+/**
+ * Tucht rond één gespeelde wedstrijd: tel lopende schorsingen van beide ploegen
+ * af (zij zaten deze wedstrijd uit), boek daarna de nieuwe kaarten. Voor de live
+ * gespeelde wedstrijd komen de kaarten uit de engine (`liveCards`); voor
+ * gesimuleerde wedstrijden worden ze statistisch gegenereerd. Muteert de save.
+ */
+export function processMatchDiscipline(
+  rng: Rng,
+  save: CareerSave,
+  match: Match,
+  liveCards?: MatchCardResult[],
+): void {
+  const players = save.worldState.players;
+  const teamIds = [match.homeTeamId, match.awayTeamId];
+  // Wie deed mee (vóór het aftellen): fit en niet geschorst.
+  const playedByTeam = teamIds.map((id) =>
+    players.filter(
+      (p) => p.teamId === id && p.status.injury === null && p.status.suspensionMatchesRemaining === 0,
+    ),
+  );
+  // Schorsingen aftellen: de wedstrijd is uitgezeten.
+  for (const id of teamIds) {
+    for (const p of players) {
+      if (p.teamId === id && p.status.suspensionMatchesRemaining > 0) {
+        p.status.suspensionMatchesRemaining -= 1;
+      }
+    }
+  }
+  // Nieuwe kaarten boeken.
+  if (liveCards) {
+    const byId = new Map(players.map((p) => [p.id, p]));
+    for (const c of liveCards) {
+      const p = byId.get(c.playerId);
+      if (!p) continue;
+      if (c.type === "yellow") bookYellow(p);
+      else bookRed(p);
+    }
+  } else {
+    for (const played of playedByTeam) generateQuickSimCards(rng, played);
+  }
 }
 
 /** Quicksim één wedstrijd uit aanval/verdediging-sterktes (met speelstijl-tilt). */
@@ -288,6 +381,10 @@ export interface PlayMatchdayOptions {
   liveMatchId?: UUID | null;
   liveHomeGoals?: number;
   liveAwayGoals?: number;
+  /** Kaarten uit de live gespeelde wedstrijd (beide ploegen), voor schorsingen. */
+  liveCards?: MatchCardResult[];
+  /** Echte doelpuntenmakers (speler-id's) van de live wedstrijd, per ploeg. */
+  liveScorers?: { home: UUID[]; away: UUID[] };
 }
 
 /** Werk één kalenderdatum af: alle geplande wedstrijden op `date` (alle
@@ -313,8 +410,13 @@ function simulateDate(
       else if (myTilt && m.awayTeamId === myId) tilt = { homeAtt: myTilt.opp, awayAtt: myTilt.own };
       simulateMatch(rng, strengths, m, tilt);
     }
-    // Doelpuntenmakers/assists toekennen voor de topscorerslijst.
-    attributeScorers(rng, save, m);
+    // Doelpuntenmakers/assists toekennen voor de topscorerslijst. Voor de live
+    // gespeelde wedstrijd de ECHTE makers gebruiken (anders statistisch).
+    const isLive = opts.liveMatchId != null && m.id === opts.liveMatchId;
+    attributeScorers(rng, save, m, isLive ? opts.liveScorers : undefined);
+    // Tucht: schorsingen aftellen + nieuwe kaarten (live uit de engine, anders
+    // statistisch). De live wedstrijd levert kaarten voor beide ploegen.
+    processMatchDiscipline(rng, save, m, isLive ? (opts.liveCards ?? []) : undefined);
   }
   // Knockout-rondes: beslis gelijke duels (pens) en loot volgende rondes.
   processKnockouts(save, rng);

@@ -113,6 +113,7 @@ export function generatePlayer(rng: Rng, teamId: string, opts: GenPlayerOpts): P
       form: rng.int(40, 70),
       injury: null,
       suspensionMatchesRemaining: 0,
+      yellowCards: 0,
     },
     market: {
       estimatedValue: value,

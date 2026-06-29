@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type {
+  CardEvent,
   MatchConfig,
   MatchPlayerSetup,
   MatchSnapshot,
@@ -11,11 +12,16 @@ import { RULES } from "@pitch/shared";
 import { MatchController } from "../match/MatchController.js";
 import { ClubCrest } from "../components/ClubCrest";
 
+/** Kaart-uitslag richting career (subset van CardEvent). */
+type CardResult = { playerId: string; type: "yellow" | "red" };
+/** Echte doelpuntenmakers per ploeg (speler-id's; eigen doelpunten uitgezonderd). */
+type Scorers = { home: string[]; away: string[] };
+
 interface Props {
   config: MatchConfig;
   onExit: () => void;
-  /** Career: vuurt eenmalig bij fulltime met de eindstand. */
-  onFinish?: (homeGoals: number, awayGoals: number) => void;
+  /** Career: vuurt eenmalig bij fulltime met de eindstand, kaarten en makers. */
+  onFinish?: (homeGoals: number, awayGoals: number, cards: CardResult[], scorers: Scorers) => void;
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -45,9 +51,32 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
     if (!snap || finishedRef.current) return;
     if (snap.phase === "fulltime") {
       finishedRef.current = true;
-      onFinish?.(snap.score.home, snap.score.away);
+      const cards: CardResult[] = snap.cards.map((c) => ({ playerId: c.playerId, type: c.type }));
+      // Echte makers (geen eigen doelpunten, alleen bekende id's) per ploeg.
+      const scorerIds = (side: Side): string[] =>
+        snap.goals
+          .filter((g) => g.side === side && !g.ownGoal && g.scorerId)
+          .map((g) => g.scorerId as string);
+      onFinish?.(snap.score.home, snap.score.away, cards, { home: scorerIds("home"), away: scorerIds("away") });
     }
   }, [snap, onFinish]);
+
+  // Kaart-melding: toon kort de laatst uitgedeelde kaart. Detectie en het
+  // wegtimen staan apart: de snapshot verandert ~10×/s, dus de timer mag niet
+  // aan dat effect hangen (anders wist de cleanup hem meteen weer).
+  const [cardToast, setCardToast] = useState<CardEvent | null>(null);
+  const lastCardSeq = useRef(0);
+  useEffect(() => {
+    if (!snap || snap.cardSeq === lastCardSeq.current) return;
+    lastCardSeq.current = snap.cardSeq;
+    const last = snap.cards[snap.cards.length - 1];
+    if (last) setCardToast(last);
+  }, [snap]);
+  useEffect(() => {
+    if (!cardToast) return;
+    const t = window.setTimeout(() => setCardToast(null), 2800);
+    return () => window.clearTimeout(t);
+  }, [cardToast]);
 
   const resume = (): void => {
     controllerRef.current?.resume();
@@ -161,6 +190,8 @@ export function MatchScreen({ config, onExit, onFinish }: Props) {
         />
 
         {snap && snap.phase !== "walkout" && <Radar snap={snap} config={config} />}
+
+        {cardToast && <CardToast card={cardToast} />}
 
         {paused && (
           <div className="pause-overlay">
@@ -347,6 +378,24 @@ function Radar({ snap, config }: { snap: MatchSnapshot; config: MatchConfig }) {
   );
 }
 
+/** Korte melding bij een uitgedeelde kaart (geel/rood). */
+function CardToast({ card }: { card: CardEvent }) {
+  const red = card.type === "red";
+  return (
+    <div className={`card-toast${red ? " red" : " yellow"}`}>
+      <span className="ct-card" />
+      <div className="ct-info">
+        <span className="ct-kind">
+          {red ? (card.secondYellow ? "Rood (2× geel)" : "Rode kaart") : "Gele kaart"}
+        </span>
+        <span className="ct-name">
+          {card.playerName} · {card.minute}&#39;
+        </span>
+      </div>
+    </div>
+  );
+}
+
 interface CardProps {
   player: MatchSnapshotPlayer | null;
   team: MatchConfig["home"];
@@ -508,6 +557,8 @@ const BOARD_TITLE: Record<string, string> = {
 function RestartBoard({ config, snap }: { config: MatchConfig; snap: MatchSnapshot }) {
   const homeGoals = snap.goals.filter((g) => g.side === "home");
   const awayGoals = snap.goals.filter((g) => g.side === "away");
+  const homeCards = snap.cards.filter((c) => c.side === "home");
+  const awayCards = snap.cards.filter((c) => c.side === "away");
   const line = (g: { scorer: string; minute: number; ownGoal: boolean }): string =>
     `${g.scorer}${g.ownGoal ? " (e.d.)" : ""} ${g.minute}'`;
   return (
@@ -538,6 +589,29 @@ function RestartBoard({ config, snap }: { config: MatchConfig; snap: MatchSnapsh
           ))}
         </ul>
       </div>
+      {(homeCards.length > 0 || awayCards.length > 0) && (
+        <div className="rb-cards">
+          <ul className="rb-list rb-list-home">
+            {homeCards.map((c, i) => (
+              <li key={i}>
+                <CardChip card={c} /> {c.playerName} {c.minute}&#39;
+              </li>
+            ))}
+          </ul>
+          <ul className="rb-list rb-list-away">
+            {awayCards.map((c, i) => (
+              <li key={i}>
+                <CardChip card={c} /> {c.playerName} {c.minute}&#39;
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
+}
+
+/** Klein gekleurd kaart-icoontje (geel of rood). */
+function CardChip({ card }: { card: CardEvent }) {
+  return <span className={`card-chip${card.type === "red" ? " red" : " yellow"}`} />;
 }

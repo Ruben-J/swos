@@ -94,5 +94,13 @@ export const RULES = {
   keeperHoldKeepOut: 4.5,
 } as const;
 
+/** Tucht: gele/rode kaarten en de daaruit volgende schorsingen. */
+export const CARDS = {
+  /** Aantal gele kaarten in een seizoen voordat een wedstrijd schorsing volgt. */
+  yellowsForBan: 5,
+  /** Aantal wedstrijden schorsing na een rode kaart. */
+  redSuspension: 1,
+} as const;
+
 /** Save-schema versie. Verhoog bij elke breaking change + voeg migratie toe. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;

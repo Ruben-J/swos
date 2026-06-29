@@ -1,4 +1,10 @@
-import { Rng, type CareerSave, type Player, type UUID } from "@pitch/shared";
+import { CARDS, Rng, type CareerSave, type Player, type UUID } from "@pitch/shared";
+
+/** Uitslag van één kaart uit een gespeelde wedstrijd (engine -> career). */
+export interface MatchCardResult {
+  playerId: UUID;
+  type: "yellow" | "red";
+}
 
 const INJURY_TYPES = [
   "spierblessure",
@@ -21,13 +27,29 @@ export function statusLabel(p: Player): string | null {
     return `🤕 ${wks}w`;
   }
   if (p.status.suspensionMatchesRemaining > 0) return `🚫 ${p.status.suspensionMatchesRemaining}`;
+  // Gele kaarten dit seizoen tonen (zichtbaar vanaf de eerste); bij CARDS.yellowsForBan volgt een schorsing.
+  if (p.status.yellowCards > 0) return `🟨 ${p.status.yellowCards}`;
   return null;
 }
 
+/** Boek een gele kaart; bij een veelvoud van de drempel volgt een schorsing. */
+export function bookYellow(p: Player): void {
+  p.status.yellowCards += 1;
+  if (p.status.yellowCards % CARDS.yellowsForBan === 0) {
+    p.status.suspensionMatchesRemaining += 1;
+  }
+}
+
+/** Boek een rode kaart: schorsing voor de eerstvolgende wedstrijd(en). */
+export function bookRed(p: Player): void {
+  p.status.suspensionMatchesRemaining += CARDS.redSuspension;
+}
+
 /**
- * Verwerk de gevolgen van een speeldag: herstel lopende blessures een week,
- * tik schorsingen van de eigen ploeg af, en loot nieuwe blessures/schorsingen
- * voor de eigen selectie (geschaald met blessuregevoeligheid). Muteert de save.
+ * Verwerk de gevolgen van een speeldag: herstel lopende blessures een week en
+ * loot nieuwe blessures voor de eigen selectie (geschaald met
+ * blessuregevoeligheid). Schorsingen lopen niet hier maar per gespeelde
+ * wedstrijd af (zie processMatchDiscipline in season.ts). Muteert de save.
  */
 export function processMatchdayEvents(save: CareerSave, rng: Rng, myTeamId: UUID): void {
   const ws = save.worldState;
@@ -42,12 +64,7 @@ export function processMatchdayEvents(save: CareerSave, rng: Rng, myTeamId: UUID
 
   const mine = ws.players.filter((p) => p.teamId === myTeamId);
 
-  // Schorsingen van de eigen ploeg lopen een wedstrijd af (zat de wedstrijd uit).
-  for (const p of mine) {
-    if (p.status.suspensionMatchesRemaining > 0) p.status.suspensionMatchesRemaining -= 1;
-  }
-
-  // Nieuwe blessures/schorsingen voor de eigen selectie.
+  // Nieuwe blessures voor de eigen selectie.
   for (const p of mine) {
     if (p.status.injury) continue;
     const prone = p.hidden.injuryProneness / 100;
@@ -57,8 +74,6 @@ export function processMatchdayEvents(save: CareerSave, rng: Rng, myTeamId: UUID
         daysRemaining: rng.int(7, 49),
       };
       p.status.fitness = Math.min(p.status.fitness, 60);
-    } else if (p.status.suspensionMatchesRemaining === 0 && rng.chance(0.012)) {
-      p.status.suspensionMatchesRemaining = rng.chance(0.25) ? 2 : 1;
     }
   }
 }

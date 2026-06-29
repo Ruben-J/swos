@@ -554,6 +554,66 @@ button.btn:disabled {
   pointer-events: none;
 }
 
+/* Kaart-melding (geel/rood), kort in beeld onder de scorebug. */
+.card-toast {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(8, 12, 16, 0.9);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 8px 14px 8px 10px;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: card-pop 0.18s ease-out;
+}
+@keyframes card-pop {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.card-toast .ct-card {
+  width: 18px;
+  height: 26px;
+  border-radius: 3px;
+  flex: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.card-toast.yellow .ct-card { background: var(--gold); }
+.card-toast.red .ct-card { background: var(--danger); }
+.card-toast .ct-info { display: flex; flex-direction: column; line-height: 1.15; }
+.card-toast .ct-kind {
+  font: 800 12px var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.card-toast.yellow .ct-kind { color: var(--gold); }
+.card-toast.red .ct-kind { color: var(--danger); }
+.card-toast .ct-name { font: 500 11px var(--font-mono); color: var(--muted); }
+
+/* Kaarten op het scorebord (rust/einde): klein gekleurd kaartje per regel. */
+.rb-cards {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.card-chip {
+  display: inline-block;
+  width: 8px;
+  height: 11px;
+  border-radius: 1.5px;
+  vertical-align: -1px;
+  margin-right: 3px;
+}
+.card-chip.yellow { background: var(--gold); }
+.card-chip.red { background: var(--danger); }
+
 /* TV-naamplaatje voor de geselecteerde speler, onderin de hoeken. */
 .player-card {
   position: absolute;

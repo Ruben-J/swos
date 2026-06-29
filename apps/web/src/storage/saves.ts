@@ -49,8 +49,17 @@ type Migration = (save: CareerSave) => CareerSave;
  * Voeg een functie toe bij elke verhoging van SAVE_VERSION.
  */
 const MIGRATIONS: Migration[] = [
-  // Voorbeeld voor de toekomst:
-  // (save) => ({ ...save, worldState: { ...save.worldState, /* nieuw veld */ } }),
+  // v1 -> v2: gele-kaart-accumulator per speler (voor schorsingen uit kaarten).
+  (save) => ({
+    ...save,
+    worldState: {
+      ...save.worldState,
+      players: save.worldState.players.map((p) => ({
+        ...p,
+        status: { ...p.status, yellowCards: p.status.yellowCards ?? 0 },
+      })),
+    },
+  }),
 ];
 
 export function migrateSave(save: CareerSave): CareerSave {

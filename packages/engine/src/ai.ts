@@ -174,6 +174,12 @@ export interface TeamAiPlan {
   targets: Map<string, Vec2>;
   /** Huidige x van de verdedigende linie (opstap-/buitenspellijn) voor deze ploeg. */
   lineX: number;
+  /** x van de engage-lijn: voorbij deze lijn (richting tegendoel) jaagt een
+   *  passieve (zwakkere) ploeg de opbouw niet op, maar houdt ze haar blok. */
+  engageX: number;
+  /** Blok houden i.p.v. opjagen: de bal ligt diep bij de tegenstander en deze
+   *  (passieve) ploeg laat hem komen i.p.v. te pressen. */
+  holdShape: boolean;
 }
 
 /** Verdedigende linie volgt de BAL (niet een losse diepe spits): schuift op als
@@ -206,6 +212,9 @@ export function computeTeamPlan(
   controlling: Side | null,
   tactics: TeamTactics = DEFAULT_TACTICS,
   tick = 0,
+  /** 0..1 hoe terughoudend deze ploeg verdedigt (zwakker team tegen sterker):
+   *  zakt dieper, jaagt de opbouw niet op de helft van de tegenstander op. */
+  passivity = 0,
 ): TeamAiPlan {
   const teamHasBall = controlling === side;
 
@@ -229,6 +238,14 @@ export function computeTeamPlan(
   // Zijn we in balbezit? Ook een eigen losse bal (net gepasst, even owner-loos)
   // telt als bezit: dan vorm zoeken i.p.v. de eigen bal "pressen".
   const inPossession = teamHasBall || (controlling === null && ball.lastTouchSide === side);
+
+  // Passiviteit (zwakker team): de engage-lijn schuift naar de eigen helft. Ligt
+  // de bal dáárvoorbij (de tegenstander bouwt diep op), dan houdt de ploeg haar
+  // compacte blok i.p.v. de opbouw op te jagen — laat de sterkere ploeg komen.
+  const engageDist = PITCH.width * (1 - 0.5 * passivity); // 0 -> hele veld, 1 -> eigen helft
+  const ballDistOwn = side === "home" ? ball.pos.x : PITCH.width - ball.pos.x;
+  const holdShape = !inPossession && controlling !== null && ballDistOwn > engageDist;
+  const engageX = side === "home" ? engageDist : PITCH.width - engageDist;
 
   const targets = new Map<string, Vec2>();
   const outfield: PlayerEntity[] = [];
@@ -340,8 +357,9 @@ export function computeTeamPlan(
     // Bij echt verdedigen (tegenstander in bezit) houdt de linie een MIDBLOK aan
     // i.p.v. door te schuiven tot de middenlijn: zo zit de ploeg niet met z'n
     // allen op de helft van de tegenstander en houden de verdedigers ruimte achter.
-    const pushCap = phase >= 0 ? DEF_LINE_PUSH_MAX : DEF_LINE_DEFEND_CAP;
-    lineFloor = clamp(ballDist * 0.55, DEF_LINE_HARD_MIN, pushCap);
+    // Een passieve (zwakkere) ploeg zakt nog wat dieper en houdt een lagere cap.
+    const pushCap = (phase >= 0 ? DEF_LINE_PUSH_MAX : DEF_LINE_DEFEND_CAP) * (1 - 0.28 * passivity);
+    lineFloor = clamp(ballDist * (0.55 - 0.16 * passivity), DEF_LINE_HARD_MIN, pushCap);
   }
   const lineX = side === "home" ? lineFloor : PITCH.width - lineFloor;
   for (const p of players) {
@@ -390,8 +408,10 @@ export function computeTeamPlan(
         return { p, cost: time / eager };
       })
       .sort((a, b) => a.cost - b.cost);
+    // In een passief blok blijft één man als "contain" rustig de bal benaderen
+    // (tot de engage-lijn), maar de rest houdt vorm: geen tweede drukzetter.
     presserId = ranked[0]?.p.id ?? null;
-    coverId = ranked[1]?.p.id ?? null;
+    if (!holdShape) coverId = ranked[1]?.p.id ?? null;
   }
 
   // Mandekking: gecoördineerd 1-op-1. De presser jaagt de bal; de overige
@@ -400,7 +420,7 @@ export function computeTeamPlan(
   // de ploeg gewoon haar formatie. We dekken NIET als we zelf in bezit zijn —
   // ook niet tijdens een eigen pass (bal even owner-loos): dan formatie zoeken.
   const marks = new Map<string, string>();
-  if (!inPossession) {
+  if (!inPossession && !holdShape) {
     const carrierId = ball.ownerId;
     const threats = players
       .filter(
@@ -463,7 +483,7 @@ export function computeTeamPlan(
     });
   }
 
-  return { side, presserId, coverId, runnerId, marks, targets, lineX };
+  return { side, presserId, coverId, runnerId, marks, targets, lineX, engageX, holdShape };
 }
 
 /**
@@ -581,6 +601,21 @@ export function computeAiCommand(
     return cmd;
   }
 
+  // Passief blok (zwakker team): de aangewezen man komt wél RUSTIG (joggend) op,
+  // maar loopt NIET op de bal in — hij houdt CONTAIN-afstand goal-zijde en schermt
+  // de weg naar het doel af (jockeyen). Zo kan de drager niet simpel wegdraaien en
+  // erlangs sprinten. Pas als de drager de bal tot pal vóór hem brengt, prikt hij.
+  if (player.id === plan.presserId && plan.holdShape) {
+    const toGoal = normalize({ x: ownGoal.x - ball.pos.x, y: ownGoal.y - ball.pos.y });
+    const standoff = 2.6; // net buiten tackle-bereik: afschermen, niet induiken
+    const aim: Vec2 = { x: ball.pos.x + toGoal.x * standoff, y: ball.pos.y + toGoal.y * standoff };
+    // Alleen het laatste stukje rustig dichtknijpen; al op contain-afstand niet
+    // verder op de bal inlopen (anders ben je zo gepasseerd).
+    moveTo(cmd, player, aim, false);
+    if (dist(player.pos, ball.pos) < 1.1 && ball.ownerId && ball.ownerId !== player.id) cmd.tackle = true;
+    return cmd;
+  }
+
   // Verdedigen / losse bal. Een eigen vooruit gespeelde bal mét aangewezen loper
   // laten we aan die loper over (hierboven); anders (bv. een losse bal achterin)
   // gaat de dichtste man er gewoon op af.
@@ -650,8 +685,25 @@ export function computeAiCommand(
         // komt de bal die kant op, dek dan strak. Dichtbij het eigen doel sowieso
         // krap. Niet achter de eigen doellijn/keeper.
         const ballToMan = dist(ball.pos, man.pos);
-        let gap = clamp(2.2 + ballToMan * 0.14, 2.2, 8);
-        if (nearOwnGoal) gap = Math.min(gap, 2.8);
+        // Pass/bal onderweg naar mijn man: er AGRESSIEF voor stappen (onderscheppen
+        // of bij de eerste aanname challengen) i.p.v. losjes goal-zijde blijven —
+        // zo wordt een pass naar de aanvaller veel riskanter.
+        const towardMan =
+          (man.pos.x - ball.pos.x) * ball.vel.x + (man.pos.y - ball.pos.y) * ball.vel.y;
+        const incoming =
+          controlling === null &&
+          len(ball.vel) > 5 &&
+          (ball.targetId === man.id || (towardMan > 0 && ballToMan < 24));
+        if (incoming) {
+          const speed = playerMaxSpeed(player.stats, true);
+          moveTo(cmd, player, predictIntercept(ball, player.pos, speed), true);
+          if (dist(player.pos, ball.pos) < 1.5) cmd.tackle = true;
+          return cmd;
+        }
+        // Goal-zijde dekken, nu STRAKKER (minder ruimte op de aanname): kleinere
+        // dekkingsafstand, en dichtbij het eigen doel echt kort op de man.
+        let gap = clamp(1.3 + ballToMan * 0.09, 1.3, 5);
+        if (nearOwnGoal) gap = Math.min(gap, 1.6);
         const mx = man.pos.x + toGoal.x * gap;
         let x = ownGoal.x === 0 ? Math.max(mx, 3) : Math.min(mx, PITCH.width - 3);
         // Opstappen / buitenspelval: ligt de bal NIET dichtbij, dan zakt de dekker
@@ -661,25 +713,23 @@ export function computeAiCommand(
           x = ownGoal.x === 0 ? Math.max(x, plan.lineX) : Math.min(x, plan.lineX);
         }
         const mark: Vec2 = { x, y: man.pos.y + toGoal.y * gap };
-        // Energie sparen: alleen sprinten om bij te trekken als het er echt toe
-        // doet (dicht bij eigen doel, of de bal/het duel is dichtbij). Ligt het
-        // spel ver weg, dan jog je naar je dekkingspositie i.p.v. te sprinten.
-        const urgent = nearOwnGoal || ballToMan < 18 || dist(player.pos, ball.pos) < 18;
-        moveTo(cmd, player, mark, urgent && dist(player.pos, mark) > (nearOwnGoal ? 3 : 6));
+        // Strakker bijtrekken: sprint eerder mee zodat de man niet vrij komt.
+        const urgent = nearOwnGoal || ballToMan < 24 || dist(player.pos, ball.pos) < 24;
+        moveTo(cmd, player, mark, urgent && dist(player.pos, mark) > (nearOwnGoal ? 2 : 4));
       }
       return cmd;
     }
   }
 
   if (player.id === plan.coverId) {
-    // Cover: positie tussen bal en eigen doel (cover shadow). Energie sparen:
-    // alleen sprinten als er echt dreiging is (bal dicht bij eigen doel of bij
-    // deze speler); ver weg gewoon joggend de cover-positie innemen.
+    // Cover: dichte rugdekking net achter de presser (cover shadow), zodat een
+    // gepasseerde presser meteen wordt opgevangen i.p.v. een vrije doorgang. Iets
+    // dichter bij de bal dan voorheen en sneller mee als er dreiging is.
     const cover: Vec2 = {
-      x: ball.pos.x + (ownGoal.x - ball.pos.x) * 0.35,
-      y: ball.pos.y + (ownGoal.y - ball.pos.y) * 0.35,
+      x: ball.pos.x + (ownGoal.x - ball.pos.x) * 0.28,
+      y: ball.pos.y + (ownGoal.y - ball.pos.y) * 0.28,
     };
-    const danger = dist(ball.pos, ownGoal) < 30 || dist(player.pos, ball.pos) < 18;
+    const danger = dist(ball.pos, ownGoal) < 40 || dist(player.pos, ball.pos) < 24;
     moveTo(cmd, player, cover, danger);
     return cmd;
   }

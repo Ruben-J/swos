@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Rng, type Match } from "@pitch/shared";
+import { CARDS, Rng, type Match } from "@pitch/shared";
 import { buildDoubleRoundRobin, totalRounds } from "./fixtures.js";
 import { computeStandings } from "./standings.js";
 import { buildWorld } from "../world/build.js";
@@ -9,6 +9,7 @@ import {
   buildTeamStrengths,
   divisionStandings,
   playMatchday,
+  processMatchDiscipline,
   seasonComplete,
   simulateRemaining,
   teamNextMatch,
@@ -630,5 +631,87 @@ describe("kit-botsing", () => {
       kits: { home: { primary: "#da291c", secondary: "#fff", pattern: "plain" as const },
               away: { primary: "#222", secondary: "#da291c", pattern: "plain" as const } } };
     expect(pickAwayKitSide(homeRed, away)).toBe("away");
+  });
+});
+
+describe("tucht (kaarten -> schorsingen)", () => {
+  function firstScheduled(save: ReturnType<typeof createCareer>): Match {
+    return save.worldState.matches.find((m) => m.state === "scheduled")!;
+  }
+
+  it("live rode kaart levert een schorsing op", () => {
+    const world = buildWorld(new Rng(3), 2025);
+    const save = createCareer(world, { seed: 1, managerName: "T", teamId: world.teams[0]!.id });
+    const m = firstScheduled(save);
+    const victim = save.worldState.players.find((p) => p.teamId === m.homeTeamId)!;
+    expect(victim.status.suspensionMatchesRemaining).toBe(0);
+    processMatchDiscipline(new Rng(1), save, m, [{ playerId: victim.id, type: "red" }]);
+    expect(victim.status.suspensionMatchesRemaining).toBe(CARDS.redSuspension);
+  });
+
+  it("vijfde gele kaart in een seizoen levert een schorsing op", () => {
+    const world = buildWorld(new Rng(3), 2025);
+    const save = createCareer(world, { seed: 1, managerName: "T", teamId: world.teams[0]!.id });
+    const m = firstScheduled(save);
+    const p = save.worldState.players.find((pl) => pl.teamId === m.awayTeamId)!;
+    p.status.yellowCards = CARDS.yellowsForBan - 1; // één onder de drempel
+    processMatchDiscipline(new Rng(1), save, m, [{ playerId: p.id, type: "yellow" }]);
+    expect(p.status.yellowCards).toBe(CARDS.yellowsForBan);
+    expect(p.status.suspensionMatchesRemaining).toBe(1);
+  });
+
+  it("een lopende schorsing telt af als de ploeg speelt", () => {
+    const world = buildWorld(new Rng(3), 2025);
+    const save = createCareer(world, { seed: 1, managerName: "T", teamId: world.teams[0]!.id });
+    const m = firstScheduled(save);
+    const banned = save.worldState.players.find((p) => p.teamId === m.homeTeamId)!;
+    banned.status.suspensionMatchesRemaining = 2;
+    processMatchDiscipline(new Rng(1), save, m, []); // geen nieuwe kaarten
+    expect(banned.status.suspensionMatchesRemaining).toBe(1);
+  });
+
+  it("gesimuleerde competities genereren kaarten over een seizoen", () => {
+    const world = buildWorld(new Rng(6), 2025);
+    let save = createCareer(world, { seed: 2, managerName: "T", teamId: world.teams[0]!.id });
+    const simRng = new Rng(5);
+    let guard = 0;
+    while (!seasonComplete(save) && guard < 60) {
+      const m = save.worldState.matches.find((x) => x.state === "scheduled")!;
+      save = playMatchday(save, simRng, m.date);
+      guard++;
+    }
+    const totalYellows = save.worldState.players.reduce((s, p) => s + p.status.yellowCards, 0);
+    expect(totalYellows).toBeGreaterThan(0);
+  });
+
+  it("seizoensovergang reset de gele-kaart-tellers", () => {
+    const world = buildWorld(new Rng(6), 2025);
+    let save = createCareer(world, { seed: 2, managerName: "T", teamId: world.teams[0]!.id });
+    save.worldState.players[0]!.status.yellowCards = 3;
+    save = simulateRemaining(save, new Rng(7));
+    const { save: next } = advanceToNextSeason(save, new Rng(8));
+    expect(next.worldState.players.every((p) => p.status.yellowCards === 0)).toBe(true);
+  });
+});
+
+describe("live wedstrijd: echte doelpuntenmakers", () => {
+  it("kent de goals van een gespeelde wedstrijd toe aan de echte makers (niet gegokt)", () => {
+    const world = buildWorld(new Rng(6), 2025);
+    const myTeam = world.teams[0]!;
+    let save = createCareer(world, { seed: 2, managerName: "T", teamId: myTeam.id });
+    const next = teamNextMatch(save.worldState.matches, myTeam.id)!;
+    const scorer = save.worldState.players.find((p) => p.teamId === next.homeTeamId)!;
+    save = playMatchday(save, new Rng(1), next.date, {
+      liveMatchId: next.id,
+      liveHomeGoals: 2,
+      liveAwayGoals: 0,
+      liveScorers: { home: [scorer.id, scorer.id], away: [] },
+      liveCards: [],
+    });
+    const played = save.worldState.matches.find((m) => m.id === next.id)!;
+    expect(played.state).toBe("played");
+    expect(played.score.home).toBe(2);
+    // Beide doelpunten staan op naam van de echte maker (geen statistische gok).
+    expect(played.goalScorers).toEqual([scorer.id, scorer.id]);
   });
 });

@@ -16,9 +16,9 @@ import { MatchAudio } from "./audio.js";
 
 export type HudListener = (snap: MatchSnapshot) => void;
 
-/** Camera-inzoomfactor (1 = heel veld, hoger = ingezoomde tv-shot). Iets lager
- *  uitgezoomd zodat er meer van de tribunes in beeld komt. */
-const MATCH_ZOOM = 1.6;
+/** Camera-inzoomfactor (1 = heel veld, hoger = ingezoomde tv-shot). Iets dichter
+ *  op het veld voor een strakkere tv-shot. */
+const MATCH_ZOOM = 1.85;
 
 /**
  * Bindt de pure engine aan de browser: maakt sim + renderer + camera + input,

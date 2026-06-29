@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { PITCH } from "@pitch/shared";
 import { createBall, kickBall } from "./ball.js";
 import { chooseBestPass, computeAiCommand, computeTeamPlan, laneBlocked, predictIntercept } from "./ai.js";
-import { tacticalTarget } from "./tactics.js";
+import { DEFAULT_TACTICS, tacticalTarget } from "./tactics.js";
 import type { MatchPlayerStats, PlayerEntity, Position, Side } from "./types.js";
 
 const STATS: MatchPlayerStats = {
@@ -38,6 +39,7 @@ function pl(id: string, side: Side, x: number, y: number, position: Position = "
     tackleCooldown: 0,
     stamina: 1,
     exhausted: false,
+    yellowCards: 0,
   };
 }
 
@@ -307,5 +309,81 @@ describe("keeper-distributie uit de handen", () => {
     const plan = computeTeamPlan(players, ball, "home", "home");
     const cmd = computeAiCommand(players, ball, gk, "home", plan, true);
     expect(cmd.kick?.targetId).toBe(mate.id); // gerichte inworp/pass
+  });
+});
+
+describe("passief blok (zwakker team)", () => {
+  it("zakt dieper en houdt het blok als de sterkere ploeg diep opbouwt", () => {
+    // Bal diep in de opbouwzone van de tegenstander (away bouwt op bij hoge x).
+    const ball = createBall({ x: PITCH.width - 10, y: 34 });
+    ball.ownerId = "ob"; // tegenstander aan de bal
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const cb = pl("cb", "home", 24, 34, "CB");
+    const cm = pl("cm", "home", 46, 34, "CM");
+    const st = pl("st", "home", 70, 34, "ST"); // hoogste man -> dichtst bij de bal -> presser
+    const ogk = pl("ogk", "away", PITCH.width - 6, 34, "GK");
+    const ob = pl("ob", "away", PITCH.width - 10, 34, "CB");
+    const players = [gk, cb, cm, st, ogk, ob];
+
+    const neutral = computeTeamPlan(players, ball, "home", "away", DEFAULT_TACTICS, 0, 0);
+    const passive = computeTeamPlan(players, ball, "home", "away", DEFAULT_TACTICS, 0, 0.8);
+
+    // Verdedigende linie zakt dieper (lagere x voor home) bij meer passiviteit.
+    expect(passive.lineX).toBeLessThan(neutral.lineX);
+    // Engage-lijn schuift naar de eigen helft; voorbij de lijn blok houden.
+    expect(passive.engageX).toBeLessThan(PITCH.width);
+    expect(passive.holdShape).toBe(true);
+    expect(neutral.holdShape).toBe(false);
+
+    // De drukzetter jaagt de diepe opbouw niet op (contain = joggen), terwijl een
+    // neutrale ploeg de bal wél zou opjagen (sprint).
+    const presser = players.find((p) => p.id === passive.presserId)!;
+    const passiveCmd = computeAiCommand(players, ball, presser, "away", passive);
+    const neutralCmd = computeAiCommand(
+      players,
+      ball,
+      players.find((p) => p.id === neutral.presserId)!,
+      "away",
+      neutral,
+    );
+    expect(neutralCmd.sprint).toBe(true);
+    expect(passiveCmd.sprint).toBe(false);
+    // Maar hij komt wél (langzaam) naar de baldrager toe: niet stilstaan/terug.
+    // De drager ligt verder naar +x; de presser beweegt richting +x.
+    expect(passiveCmd.move.x).toBeGreaterThan(0);
+    // Hij duikt niet van afstand in (jockeyen/afschermen, geen domme tackle).
+    expect(passiveCmd.tackle).toBe(false);
+  });
+
+  it("gelijkwaardige ploegen (passiviteit 0) gedragen zich onveranderd", () => {
+    const ball = createBall({ x: PITCH.width - 10, y: 34 });
+    ball.ownerId = "ob";
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const st = pl("st", "home", 70, 34, "ST");
+    const ob = pl("ob", "away", PITCH.width - 10, 34, "CB");
+    const players = [gk, st, ob];
+    const plan = computeTeamPlan(players, ball, "home", "away", DEFAULT_TACTICS, 0, 0);
+    expect(plan.holdShape).toBe(false);
+    expect(plan.engageX).toBe(PITCH.width);
+  });
+});
+
+describe("strakker verdedigen", () => {
+  it("dekker onderschept een pass naar zijn man (sprint vooruit op de bal)", () => {
+    const ball = createBall({ x: 60, y: 34 });
+    ball.vel = { x: -12, y: 0 }; // pass rolt richting de te dekken man
+    ball.targetId = "m";
+    ball.lastTouchSide = "away";
+    const gk = pl("gk", "home", 6, 34, "GK");
+    const presser = pl("pr", "home", 58, 34, "CM"); // dichtst bij de bal -> presser
+    const def = pl("d", "home", 28, 34, "CB"); // dekt de man
+    const man = pl("m", "away", 30, 34, "ST"); // ontvanger
+    const players = [gk, presser, def, man];
+    const plan = computeTeamPlan(players, ball, "home", null);
+    expect(plan.marks.get("d")).toBe("m"); // d dekt m
+    const cmd = computeAiCommand(players, ball, def, null, plan);
+    // Stapt VOORUIT op de bal (intercept) en sprint, i.p.v. losjes goal-zijde blijven.
+    expect(cmd.sprint).toBe(true);
+    expect(cmd.move.x).toBeGreaterThan(0);
   });
 });

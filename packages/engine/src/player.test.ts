@@ -37,6 +37,7 @@ function mk(): PlayerEntity {
     tackleCooldown: 0,
     stamina: 1,
     exhausted: false,
+    yellowCards: 0,
   };
 }
 

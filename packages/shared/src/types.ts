@@ -129,6 +129,9 @@ export interface Player {
     form: number;
     injury: null | { type: string; daysRemaining: number };
     suspensionMatchesRemaining: number;
+    /** Gele kaarten dit seizoen (accumulator); bij een veelvoud van
+     *  CARDS.yellowsForBan volgt een wedstrijd schorsing. Reset bij seizoensovergang. */
+    yellowCards: number;
   };
   market: {
     estimatedValue: number;

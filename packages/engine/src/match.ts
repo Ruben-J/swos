@@ -89,6 +89,8 @@ export interface MatchSnapshotPlayer {
   /** Hoe de speler de bal vasthoudt: ingooi (boven het hoofd), keeper (in de
    *  handen), of niet (null = aan de voet / geen bal). Puur voor de animatie. */
   hold: "throw" | "keeper" | null;
+  /** Gele kaarten van deze speler in deze wedstrijd (0..1; 2 = al rood/weg). */
+  yellowCards: number;
 }
 
 export interface MatchSnapshot {
@@ -117,11 +119,31 @@ export interface MatchSnapshot {
   saveSeq: number;
   /** Loopt op zodra een hervatting genomen mag worden (voor de scheidsfluit). */
   restartReadySeq: number;
+  /** Gele/rode kaarten in volgorde van uitdelen (voor overlay + terugkoppeling). */
+  cards: CardEvent[];
+  /** Loopt op bij elke nieuwe kaart (zodat de UI een nieuwe kaart herkent). */
+  cardSeq: number;
+}
+
+/** Een uitgedeelde kaart. `type` is "red" bij directe rode kaart of tweede geel
+ *  (dan is `secondYellow` true). Geldt voor presentatie én voor de
+ *  schorsing-terugkoppeling naar de career-modus. */
+export interface CardEvent {
+  side: Side;
+  playerId: string;
+  playerName: string;
+  shirtNumber: number;
+  minute: number;
+  type: "yellow" | "red";
+  secondYellow: boolean;
 }
 
 export interface GoalEvent {
   side: Side;
   scorer: string;
+  /** Speler-id van de maker (voor career-attributie); null als onbekend. Bij een
+   *  eigen doelpunt is dit de id van de speler die 'm erin werkte. */
+  scorerId: string | null;
   minute: number;
   ownGoal: boolean;
 }
@@ -202,10 +224,16 @@ export class MatchSim {
   /** Loopt op zodra een hervatting genomen mag worden (verplichte stilstand
    *  voorbij): aftrap/vrije trap/ingooi enz. -> scheidsrechtersfluit. */
   private restartReadySeq = 0;
+  /** Uitgedeelde kaarten (geel/rood) in deze wedstrijd. */
+  private cards: CardEvent[] = [];
+  private cardSeq = 0;
 
   private humanSide: Side | null;
   activeId: Record<Side, string | null> = { home: null, away: null };
   private tactics: Record<Side, TeamTactics>;
+  /** Gemiddelde veldsterkte per ploeg (uit spelerattributen), voor het
+   *  sterkteverschil dat de verdedigende terughoudendheid stuurt. */
+  private teamStrength: Record<Side, number> = { home: 60, away: 60 };
 
   // Spelhervatting (aftrap/inworp/doeltrap/hoek/vrije trap): wie neemt, welke ploeg.
   private restartTakerId: string | null = null;
@@ -218,7 +246,9 @@ export class MatchSim {
   // pijltje dat de mens met links/rechts bijstelt; Z schiet die richting op.
   private restartAim: number | null = null;
   // Uitgestelde vrije trap door een overtreding (verwerkt na de commandolus).
-  private pendingFoul: { spot: Vec2; side: Side } | null = null;
+  // `side` = de benadeelde ploeg (krijgt de vrije trap); `offenderId` = de
+  // overtreder (voor de kaart).
+  private pendingFoul: { spot: Vec2; side: Side; offenderId: string } | null = null;
   // "Fluit"-fase: bal gaat over de lijn / overtreding gemaakt; spel loopt nog
   // ~2s na voordat naar de hervatting wordt geschakeld.
   private whistleTimer = 0;
@@ -240,6 +270,10 @@ export class MatchSim {
     this.ball = createBall({ ...PITCH_CENTER });
     this.buildTeam(config.home, "home");
     this.buildTeam(config.away, "away");
+    this.teamStrength = {
+      home: this.computeTeamStrength("home"),
+      away: this.computeTeamStrength("away"),
+    };
     this.kickoffSide = this.rng.chance() ? "home" : "away";
     this.startWalkout(this.kickoffSide);
   }
@@ -311,6 +345,7 @@ export class MatchSim {
         tackleCooldown: 0,
         stamina: 1,
         exhausted: false,
+        yellowCards: 0,
       });
     }
   }
@@ -446,8 +481,8 @@ export class MatchSim {
 
     // Situationele laag: één team-plan per ploeg per tick.
     const plans: Record<Side, TeamAiPlan> = {
-      home: computeTeamPlan(this.players, this.ball, "home", controlling, this.tactics.home, this.matchSeconds),
-      away: computeTeamPlan(this.players, this.ball, "away", controlling, this.tactics.away, this.matchSeconds),
+      home: computeTeamPlan(this.players, this.ball, "home", controlling, this.tactics.home, this.matchSeconds, this.passivityFor("home")),
+      away: computeTeamPlan(this.players, this.ball, "away", controlling, this.tactics.away, this.matchSeconds, this.passivityFor("away")),
     };
 
     // Commando's bepalen en toepassen (volgorde al geschud bovenaan de tick).
@@ -485,8 +520,8 @@ export class MatchSim {
         if (owner && owner.side !== p.side) {
           const dMan = dist(p.pos, owner.pos);
           const dBall = dist(p.pos, this.ball.pos);
-          if (dMan < PLAYER.tackleRange + 0.3 && dBall > PLAYER.tackleRange) {
-            const foulProb = 0.006 * (1.5 - p.stats.tackling / 100);
+          if (dMan < PLAYER.tackleRange + 0.8 && dBall > PLAYER.tackleRange) {
+            const foulProb = 0.02 * (1.5 - p.stats.tackling / 100);
             if (this.rng.chance(foulProb)) cmd.slide = true; // mistimede inglijder
           }
         }
@@ -533,7 +568,10 @@ export class MatchSim {
       const f = this.pendingFoul;
       this.pendingFoul = null;
       const atkGoal = attackingGoal(f.side);
-      if (this.isInPenaltyBox(f.spot, atkGoal)) {
+      const inBox = this.isInPenaltyBox(f.spot, atkGoal);
+      // Scheidsrechter beoordeelt de overtreding (geel/rood) vóór de hervatting.
+      this.judgeFoul(f.offenderId, f.spot, inBox);
+      if (inBox) {
         const spotX =
           atkGoal.x === 0 ? PITCH.penaltySpotDist : PITCH.width - PITCH.penaltySpotDist;
         this.beginWhistle({ x: spotX, y: PITCH.height / 2 }, f.side, "penalty");
@@ -576,6 +614,32 @@ export class MatchSim {
 
   private matchMinute(): number {
     return Math.floor(this.matchSeconds / RULES.secondsPerMatchMinute);
+  }
+
+  /** Gemiddelde veldsterkte van een ploeg uit de spelerattributen (veldspelers). */
+  private computeTeamStrength(side: Side): number {
+    let sum = 0;
+    let n = 0;
+    for (const p of this.players) {
+      if (p.side !== side || p.isKeeper) continue;
+      const s = p.stats;
+      sum += (s.pace + s.passing + s.shooting + s.finishing + s.tackling + s.heading + s.composure + s.control) / 8;
+      n++;
+    }
+    return n > 0 ? sum / n : 60;
+  }
+
+  /**
+   * Hoe terughoudend een ploeg verdedigt (0..1): een zwakker team tegen een
+   * sterker team zakt terug en laat de opbouw komen — het sterkst aan het begin
+   * van de wedstrijd, daarna wat minder. Gelijkwaardige ploegen: 0 (onveranderd).
+   */
+  private passivityFor(side: Side): number {
+    const gap = this.teamStrength[otherSide(side)] - this.teamStrength[side];
+    if (gap <= 0) return 0;
+    const weakness = clamp(gap / 14, 0, 1); // ~14 punten verschil = maximaal terughoudend
+    const timeFactor = clamp(1 - this.matchMinute() / 180, 0.5, 1); // 0' -> 1.0, 90' -> 0.5
+    return clamp(weakness * timeFactor, 0, 1);
   }
 
   private updateActivePlayers(intent: PlayerIntent): void {
@@ -876,11 +940,18 @@ export class MatchSim {
       // met een ZICHTBAAR dribbelritme: touches duwen de bal heen en weer
       // (dichterbij -> verderweg -> dichterbij). Sneller lopen = grotere, snellere
       // touches; minder balcontrole = wat lossere uitslag.
-      const base = 0.95;
-      const amp = (moving > 1.2 ? 0.7 : 0.18) + (1 - ctrl) * 0.2;
+      // Bewegingsfactor: stilstaand (~0) -> bal rust aan de voet zónder
+      // dribbelritme; in beweging -> zichtbare touches. Zo verschijnt er geen
+      // "dribbelanimatie" als de speler stilstaat met de bal.
+      const moveFactor = clamp(moving / 1.5, 0, 1);
+      // Bal blijft DICHT aan de voet (controleerbaar): kleine basisafstand + een
+      // subtiel, zichtbaar dribbelritme. Niet zó ver vooruit dat een draai of pass
+      // de bal verspeelt / blootlegt aan een tackle.
+      const base = 0.7 + 0.12 * moveFactor; // 0.70 stil .. ~0.82 in beweging
+      const amp = (0.16 + (1 - ctrl) * 0.14) * moveFactor; // subtiel ritme; 0 bij stilstand
       const cadence = 7 + moving * 0.5; // touch-frequentie (rad/s)
       const ahead = base + amp * 0.5 * Math.sin(this.matchSeconds * cadence);
-      const stick = 10 + ctrl * 8; // catch-up: hoog = strak aan de voet
+      const stick = 14 + ctrl * 9; // strakke catch-up: bal volgt vlot mee bij een draai
       const fx = Math.cos(p.facing);
       const fy = Math.sin(p.facing);
       const targetX = p.pos.x + fx * ahead;
@@ -888,12 +959,13 @@ export class MatchSim {
       this.ball.pos.x += (targetX - this.ball.pos.x) * Math.min(1, dt * stick);
       this.ball.pos.y += (targetY - this.ball.pos.y) * Math.min(1, dt * stick);
 
-      // Te ver achtergebleven (scherpe draai/versnelling) bij beperkte controle ->
-      // de bal raakt los: ownership vrij, hij rolt door in de looprichting.
+      // Te ver achtergebleven (echt overlopen op snelheid) bij beperkte controle ->
+      // de bal raakt los: ownership vrij, hij rolt door in de looprichting. Ruime
+      // drempel zodat een gewone draai de bal NIET verspeelt.
       const offDist = dist(this.ball.pos, p.pos);
-      const looseLimit = base + amp + 0.8 + ctrl * 0.6;
+      const looseLimit = base + amp + 1.2 + ctrl * 0.9;
       const speed = len(p.vel);
-      if (offDist > looseLimit && speed > 5) {
+      if (offDist > looseLimit && speed > 6) {
         this.ball.ownerId = null;
         this.ballProtectedFor = null;
         this.ball.sinceKick = 0; // voorkomt instant terugpakken
@@ -1020,10 +1092,82 @@ export class MatchSim {
         o.state = "tumble";
         o.stateTimer = TUMBLE_TIME;
         o.vel = { x: away.x * 3 + dir.x * 2.5, y: away.y * 3 + dir.y * 2.5 };
-        this.pendingFoul = { spot: { ...o.pos }, side: o.side };
+        this.pendingFoul = { spot: { ...o.pos }, side: o.side, offenderId: p.id };
         return;
       }
     }
+  }
+
+  /**
+   * Scheidsrechter beoordeelt een overtreding: niets, geel of (direct) rood. Een
+   * onbesuisde speler (lage composure/tackling) en een fout in de eigen
+   * gevarenzone (kansontneming) worden eerder bestraft. Een tweede geel wordt
+   * rood. Deterministisch via de sim-rng, dus replays blijven gelijk.
+   */
+  private judgeFoul(offenderId: string, spot: Vec2, inBox: boolean): void {
+    const p = this.byId(offenderId);
+    if (!p) return;
+    // 0..~0.8: hoe roekeloos de overtreder is.
+    const recklessness = clamp(1 - (p.stats.composure * 0.6 + p.stats.tackling * 0.4) / 100, 0, 1);
+    // Gevarenzone: dicht bij het doel dat de overtreder verdedigt -> kansontneming.
+    const dangerGoal = attackingGoal(otherSide(p.side));
+    const nearGoal = dist(spot, dangerGoal) < 28;
+    // De meeste overtredingen blijven onbestraft (alleen vrije trap); een deel
+    // levert geel op. Zo stapelen tweede gelen zich niet te snel op tot rood.
+    const yellowChance = clamp(
+      0.18 + 0.22 * recklessness + (nearGoal ? 0.1 : 0) + (inBox ? 0.07 : 0),
+      0,
+      0.8,
+    );
+    // Directe rode kaart (grove/laatste-man overtreding): echt zeldzaam.
+    const redChance = clamp(0.004 + 0.014 * recklessness + (nearGoal ? 0.02 : 0), 0, 0.08);
+    if (this.rng.chance(redChance)) {
+      this.giveCard(p, "red", false);
+      return;
+    }
+    if (this.rng.chance(yellowChance)) {
+      if (p.yellowCards >= 1) this.giveCard(p, "red", true);
+      else this.giveCard(p, "yellow", false);
+    }
+  }
+
+  /** Deel een kaart uit (en stuur bij rood van het veld). */
+  private giveCard(p: PlayerEntity, type: "yellow" | "red", secondYellow: boolean): void {
+    if (type === "yellow") p.yellowCards += 1;
+    this.cardSeq += 1;
+    this.cards.push({
+      side: p.side,
+      playerId: p.id,
+      playerName: `${p.firstName.charAt(0)}. ${p.lastName}`,
+      shirtNumber: p.shirtNumber,
+      minute: clamp(this.matchMinute(), 0, RULES.matchMinutes),
+      type,
+      secondYellow,
+    });
+    if (type === "red") this.sendOff(p);
+  }
+
+  /** Rode kaart: de speler verlaat het veld (uit de spelerslijst). Bal en
+   *  besturing gaan over; de ploeg speelt met een man minder. */
+  private sendOff(p: PlayerEntity): void {
+    if (this.ball.ownerId === p.id) {
+      this.ball.ownerId = null;
+      if (this.ballProtectedFor === p.side) this.ballProtectedFor = null;
+    }
+    if (this.activeId[p.side] === p.id) {
+      let best: PlayerEntity | null = null;
+      let bestD = Infinity;
+      for (const o of this.players) {
+        if (o.side !== p.side || o.id === p.id || o.isKeeper) continue;
+        const d = dist(o.pos, p.pos);
+        if (d < bestD) {
+          bestD = d;
+          best = o;
+        }
+      }
+      this.activeId[p.side] = best ? best.id : null;
+    }
+    this.players = this.players.filter((o) => o.id !== p.id);
   }
 
   /** Spelers kunnen niet overlappen; ze duwen elkaar (tacklende glijdt door). */
@@ -1107,8 +1251,8 @@ export class MatchSim {
       ? this.restartSpecialTargets(this.ball.pos, taking, this.restartKind, taker?.id ?? null)
       : null;
     const plans: Record<Side, TeamAiPlan> = {
-      home: computeTeamPlan(this.players, this.ball, "home", taking, this.tactics.home, this.matchSeconds),
-      away: computeTeamPlan(this.players, this.ball, "away", taking, this.tactics.away, this.matchSeconds),
+      home: computeTeamPlan(this.players, this.ball, "home", taking, this.tactics.home, this.matchSeconds, this.passivityFor("home")),
+      away: computeTeamPlan(this.players, this.ball, "away", taking, this.tactics.away, this.matchSeconds, this.passivityFor("away")),
     };
     for (const p of this.players) {
       p.tackleCooldown = Math.max(0, p.tackleCooldown - dt);
@@ -1645,6 +1789,7 @@ export class MatchSim {
     this.goals.push({
       side: scoringSide,
       scorer,
+      scorerId: toucher ? toucher.id : null,
       minute: Math.max(1, Math.min(RULES.matchMinutes, Math.ceil(this.matchMinute()))),
       ownGoal,
     });
@@ -1896,8 +2041,8 @@ export class MatchSim {
     // eigen doel trekken (de bal ligt daar); negeer 'm dan en spreid op rol.
     const spotBall: BallState = { ...this.ball, pos: spot, vel: { x: 0, y: 0 } };
     const plans: Record<Side, TeamAiPlan> = {
-      home: computeTeamPlan(this.players, spotBall, "home", takingSide, this.tactics.home, this.matchSeconds),
-      away: computeTeamPlan(this.players, spotBall, "away", takingSide, this.tactics.away, this.matchSeconds),
+      home: computeTeamPlan(this.players, spotBall, "home", takingSide, this.tactics.home, this.matchSeconds, this.passivityFor("home")),
+      away: computeTeamPlan(this.players, spotBall, "away", takingSide, this.tactics.away, this.matchSeconds, this.passivityFor("away")),
     };
     for (const p of this.players) {
       p.tackleCooldown = Math.max(0, p.tackleCooldown - dt);
@@ -2288,6 +2433,7 @@ export class MatchSim {
         isActive: this.activeId[p.side] === p.id,
         hasBall: this.ball.ownerId === p.id,
         hold: this.holdStyle(p),
+        yellowCards: p.yellowCards,
       })),
       ball: { x: this.ball.pos.x, y: this.ball.pos.y, z: this.ball.z },
       score: { ...this.score },
@@ -2315,6 +2461,8 @@ export class MatchSim {
       goalImpact: this.goalImpact ? { ...this.goalImpact } : null,
       saveSeq: this.saveSeq,
       restartReadySeq: this.restartReadySeq,
+      cards: this.cards.map((c) => ({ ...c })),
+      cardSeq: this.cardSeq,
     };
   }
 }

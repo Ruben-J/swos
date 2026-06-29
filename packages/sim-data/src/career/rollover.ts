@@ -102,8 +102,11 @@ export function advanceToNextSeason(
     if (team) team.divisionId = mv.toDivisionId;
   }
 
-  // Spelers verouderen een jaar.
-  for (const p of ws.players) p.ageYears += 1;
+  // Spelers verouderen een jaar; gele-kaart-tellers gaan het nieuwe seizoen op nul.
+  for (const p of ws.players) {
+    p.ageYears += 1;
+    p.status.yellowCards = 0;
+  }
 
   // Nieuw seizoen + verse kalender.
   oldSeason.promotedRelegatedResolved = true;

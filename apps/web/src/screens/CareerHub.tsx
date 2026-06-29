@@ -1177,6 +1177,12 @@ function CompetitionsView({ save }: { save: CareerSave }) {
     .sort((a, b) => b.goals - a.goals || b.assists - a.assists)
     .slice(0, 15);
 
+  // Tucht dit seizoen: meeste gele kaarten van spelers uit deze competitie.
+  const cardLeaders = ws.players
+    .filter((p) => p.teamId !== null && comp.teamIds.includes(p.teamId) && p.status.yellowCards > 0)
+    .sort((a, b) => b.status.yellowCards - a.status.yellowCards)
+    .slice(0, 15);
+
   return (
     <div className="ch-body ch-compdetail">
       <section className="ch-panel ch-complist">
@@ -1302,6 +1308,36 @@ function CompetitionsView({ save }: { save: CareerSave }) {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {isLeague && cardLeaders.length > 0 && (
+          <>
+            <h3 className="ch-recent-title">Meeste gele kaarten</h3>
+            <table className="cd-standings cd-scorers">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th className="ch-tn">Speler</th>
+                  <th className="ch-tn">Club</th>
+                  <th>🟨</th>
+                  <th>🚫</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cardLeaders.map((p, i) => (
+                  <tr key={p.id} className={p.teamId === myId ? "ch-me" : ""}>
+                    <td>{i + 1}</td>
+                    <td className="ch-tn">
+                      {p.firstName.charAt(0)}. {p.lastName}
+                    </td>
+                    <td className="ch-tn">{p.teamId ? teamName(p.teamId) : "—"}</td>
+                    <td className="ch-pts">{p.status.yellowCards}</td>
+                    <td>{p.status.suspensionMatchesRemaining > 0 ? p.status.suspensionMatchesRemaining : ""}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </>

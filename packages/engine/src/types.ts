@@ -67,6 +67,8 @@ export interface PlayerEntity {
   vz?: number;
   /** Tijdens een sliding tackle al bal/man geraakt? (voorkomt dubbele afhandeling). */
   slideTouched?: boolean;
+  /** Gele kaarten in deze wedstrijd (2 -> rood). */
+  yellowCards: number;
 }
 
 /** De bal als spel-specifiek kinematisch object. */

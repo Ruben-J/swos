@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { MatchConfig } from "@pitch/engine";
 import { Rng, hashSeed, type CareerSave, type Match } from "@pitch/shared";
-import { advanceToNextSeason, playMatchday } from "@pitch/sim-data";
+import { advanceToNextSeason, playMatchday, type MatchCardResult } from "@pitch/sim-data";
 import { MainMenu } from "./screens/MainMenu.js";
 import { MatchScreen } from "./screens/MatchScreen.js";
 import { CareerSetup } from "./career/CareerSetup.js";
@@ -50,13 +50,20 @@ export function App() {
   );
 
   const finishCareerMatch = useCallback(
-    (homeGoals: number, awayGoals: number) => {
+    (
+      homeGoals: number,
+      awayGoals: number,
+      cards: MatchCardResult[],
+      scorers: { home: string[]; away: string[] },
+    ) => {
       if (!career || !careerMatch) return;
       const rng = new Rng(hashSeed(`${career.id}:${careerMatch.date}`));
       const updated = playMatchday(structuredClone(career), rng, careerMatch.date, {
         liveMatchId: careerMatch.id,
         liveHomeGoals: homeGoals,
         liveAwayGoals: awayGoals,
+        liveCards: cards,
+        liveScorers: scorers,
       });
       persist(updated);
       setCareerMatch(null);
